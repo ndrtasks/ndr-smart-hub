@@ -88,7 +88,7 @@ export const services = [
   {
     id:'short-permission', departmentId:'hr', name:'إذن قصير', code:'HR-SRV-PERM', procedure:'إجراء الأذونات', mode:'FORM_WORKFLOW', active:true,
     description:'إذن قصير يمر بالمدير المباشر أو البديل المفوض ثم الموارد البشرية.',
-    aliases:['إذن قصير','استئذان','إذن ساعات','موعد شخصي','خروج ساعتين'],
+    aliases:['إذن قصير','استئذان','استاذن','بستأذن','بستاذن','أستأذن','اذن','إذن ساعات','موعد شخصي','خروج ساعتين','بطلع بدري','أبي أطلع','احتاج أطلع'],
     form:{templateName:'طلب إذن قصير', revision:'تجريبي', declaration:'أقر بصحة وقت الإذن والغرض منه.'},
     fields:[
       {id:'permissionDate', label:'تاريخ الإذن', type:'date', required:true},
@@ -103,8 +103,8 @@ export const services = [
   },
   {
     id:'attendance-memo', departmentId:'hr', name:'مذكرة الحضور', code:'HR-F-25', procedure:'إجراء الحضور والانصراف', mode:'FORM_WORKFLOW', active:true,
-    description:'طلب تعديل سجل الحضور لحالة غياب أو تأخر أو خروج مبكر أو بصمة مفقودة أو عمل عن بعد أو حالة أخرى.',
-    aliases:['مذكرة حضور','مذكرة الحضور','تعديل الحضور','تصحيح الحضور','تعديل البصمة','نسيت البصمة','لم أبصم','ما بصمت','تأخرت','تأخير','خروج مبكر','غائب','عمل عن بعد','HR-F-25'],
+    description:'طلب تصحيح أو توضيح حالة حضور حدثت فعليا مثل التأخر أو الخروج المبكر أو البصمة المفقودة أو الغياب أو العمل عن بعد. لا يستخدم كبديل عن الإذن القصير.',
+    aliases:['مذكرة حضور','مذكرة الحضور','تعديل الحضور','تصحيح الحضور','تعديل البصمة','نسيت البصمة','لم أبصم','ما بصمت','تأخرت','تاخرت','تأخير','خروج مبكر','طلعت بدري','خرجت بدري','غائب','غبت','غيبت','عمل عن بعد','دوام عن بعد','HR-F-25'],
     form:{
       templateName:'HR-F-25 مذكرة الحضور', revision:'5', masterPath:'assets/HR-F-25 مذكرة الحضور.pdf', sourceFormat:'PDF',
       declaration:'أقر بصحة بيانات الحضور والسبب الموضح وأطلب تعديل سجل الحضور وفقا للمرفقات والاعتمادات.'
@@ -112,17 +112,22 @@ export const services = [
     fields:[
       {id:'attendanceDate', label:'تاريخ الحالة', type:'date', required:true},
       {id:'caseType', label:'نوع الحالة', type:'select', required:true, options:['غائب','خروج مبكر','متأخر','لم يبصم','العمل عن بعد','أخرى']},
-      {id:'inTime', label:'وقت الدخول الفعلي', type:'time', required:false},
-      {id:'outTime', label:'وقت الخروج الفعلي', type:'time', required:false},
-      {id:'reason', label:'السبب والتوضيح', type:'textarea', required:true, placeholder:'اشرح ما حدث وما التعديل المطلوب على سجل الحضور'}
+      {id:'absenceStatus', label:'حالة الغياب', type:'select', options:['بعذر ومستند داعم','بعذر بدون مستند','بدون عذر'], showWhen:{field:'caseType',equals:'غائب'}, requiredWhen:{field:'caseType',equals:'غائب'}},
+      {id:'missedPunchType', label:'البصمة المفقودة', type:'select', options:['بصمة الدخول','بصمة الخروج','بصمتي الدخول والخروج'], showWhen:{field:'caseType',equals:'لم يبصم'}, requiredWhen:{field:'caseType',equals:'لم يبصم'}},
+      {id:'remotePeriod', label:'فترة العمل عن بعد', type:'select', options:['يوم كامل','جزء من اليوم'], showWhen:{field:'caseType',equals:'العمل عن بعد'}, requiredWhen:{field:'caseType',equals:'العمل عن بعد'}},
+      {id:'inTime', label:'وقت الدخول الفعلي', type:'time', showWhenAny:[{field:'caseType',equals:'متأخر'},{field:'missedPunchType',in:['بصمة الدخول','بصمتي الدخول والخروج']},{field:'remotePeriod',equals:'جزء من اليوم'}], requiredWhenAny:[{field:'caseType',equals:'متأخر'},{field:'missedPunchType',in:['بصمة الدخول','بصمتي الدخول والخروج']},{field:'remotePeriod',equals:'جزء من اليوم'}]},
+      {id:'outTime', label:'وقت الخروج الفعلي', type:'time', showWhenAny:[{field:'caseType',equals:'خروج مبكر'},{field:'missedPunchType',in:['بصمة الخروج','بصمتي الدخول والخروج']},{field:'remotePeriod',equals:'جزء من اليوم'}], requiredWhenAny:[{field:'caseType',equals:'خروج مبكر'},{field:'missedPunchType',in:['بصمة الخروج','بصمتي الدخول والخروج']},{field:'remotePeriod',equals:'جزء من اليوم'}]},
+      {id:'reason', label:'السبب والتوضيح', type:'textarea', required:true, placeholder:'اشرح ما حدث باختصار وما المطلوب تعديله في سجل الحضور'}
     ],
-    attachments:[],
+    attachments:[
+      {id:'absenceEvidence', label:'مستند داعم للغياب', accept:'.pdf,.png,.jpg,.jpeg', showWhen:{field:'absenceStatus',equals:'بعذر ومستند داعم'}, requiredWhen:{field:'absenceStatus',equals:'بعذر ومستند داعم'}}
+    ],
     workflowTemplate:[
       {id:'direct-manager', label:'مراجعة واعتماد مدير القسم', resolver:{type:'DIRECT_MANAGER'}, mode:'SEQUENTIAL', stageFields:[
         {id:'departmentAuthorization',label:'تصنيف موافقة القسم',type:'select',options:['عمل خاص بالمعهد','عمل شخصي مصرح','ملاحظة إدارية فقط']},
         {id:'departmentRemarks',label:'ملاحظات مدير القسم',type:'textarea'}
       ]},
-      {id:'hr-review', label:'مراجعة واعتماد الموارد البشرية', resolver:{type:'NAMED_USER', userId:'E002', fallbackRole:'specialist', departmentId:'hr'}, mode:'SEQUENTIAL', stageFields:[
+      {id:'hr-review', label:'مراجعة واعتماد الموارد البشرية', resolver:{type:'HR_RESPONSIBLE', preferredUserId:'E001'}, mode:'SEQUENTIAL', stageFields:[
         {id:'currentMonthMemoCount',label:'عدد مذكرات الحضور في الشهر الحالي',type:'number'},
         {id:'yearToDateMemoCount',label:'عدد المذكرات منذ بداية العام',type:'number'},
         {id:'sameReasonMemoCount',label:'عدد المذكرات لنفس السبب',type:'number'},

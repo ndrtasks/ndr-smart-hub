@@ -21,8 +21,16 @@ const state = {
   delegations: load(KEYS.delegations, clone(defaultDelegations)),
   orgOverrides: load(KEYS.org, {}),
   workflowOverrides: load(KEYS.templates, {}),
-  messages: [{role:'ai', text:'أهلا بك. اشرح لي ما تريد إنجازه وسأحدد لك الخدمة والمسار المناسب من الخدمات المعرفة حاليا.'}]
+  messages: []
 };
+
+function defaultMessages(){
+  return [{role:'ai', text:'أهلا بك. اشرح ما تريد إنجازه بطريقتك وسأميز بين الطلب الجديد وتصحيح حالة حدثت فعليا.'}];
+}
+function chatKey(userId){return userId?`ndr_p5_chat_${userId}`:null}
+function loadUserMessages(userId){const key=chatKey(userId);return key?load(key,defaultMessages()):defaultMessages()}
+function saveUserMessages(){const key=chatKey(state.user?.id);if(key)save(key,state.messages)}
+state.messages=loadUserMessages(state.user?.id);
 
 function load(key, fallback){
   try { const v = JSON.parse(localStorage.getItem(key) || 'null'); return v ?? fallback; } catch { return fallback; }
@@ -63,10 +71,11 @@ function resolverText(resolver){
   if(resolver.type==='NAMED_USER')return userById(resolver.userId)?.name||'مستخدم محدد';
   if(resolver.type==='DEPARTMENT_MANAGER_FIXED')return `مدير ${deptName(resolver.departmentId)}`;
   if(resolver.type==='ROLE_IN_DEPARTMENT')return `${roleName(resolver.role)} - ${deptName(resolver.departmentId)}`;
+  if(resolver.type==='HR_RESPONSIBLE')return 'المختص المسؤول في الموارد البشرية';
   if(resolver.type==='MANUAL')return 'مسار يدوي';
   return resolver.type;
 }
-function resolveStep(step, owner, serviceId){
+function resolveStep(step, owner, serviceId, context={}){
   const r=step.resolver||{}; let assignments=[];
   const addPrincipal=id=>{if(id)assignments.push(effectiveAssignment(id,serviceId))};
   if(r.type==='DIRECT_MANAGER' && owner.managerId) addPrincipal(owner.managerId);
@@ -75,9 +84,18 @@ function resolveStep(step, owner, serviceId){
   if(r.type==='NAMED_USER'){
     let id=r.userId;
     if(r.excludeOwner && id===owner.id){
-      id=users.find(u=>u.departmentId===r.departmentId && u.role===r.fallbackRole && u.id!==owner.id)?.id || managerIdForDepartment(r.departmentId);
+      id=r.fallbackUserId || users.find(u=>u.departmentId===r.departmentId && u.role===r.fallbackRole && u.id!==owner.id)?.id || managerIdForDepartment(r.departmentId);
     }
     addPrincipal(id);
+  }
+  if(r.type==='HR_RESPONSIBLE'){
+    const previous=new Set(context.previousAssigneeIds||[]);
+    const candidates=[r.preferredUserId||'E001','HRM01','E002']
+      .filter(Boolean)
+      .filter((id,index,arr)=>arr.indexOf(id)===index)
+      .filter(id=>id!==owner.id && !previous.has(id));
+    const selected=candidates.find(id=>userById(id)) || [r.preferredUserId||'E001','HRM01','E002'].find(id=>id!==owner.id&&userById(id));
+    addPrincipal(selected);
   }
   if(r.type==='ROLE_IN_DEPARTMENT'){
     users.filter(u=>u.departmentId===r.departmentId && u.role===r.role && (!r.excludeOwner||u.id!==owner.id)).forEach(u=>addPrincipal(u.id));
@@ -86,13 +104,16 @@ function resolveStep(step, owner, serviceId){
   return assignments;
 }
 function instantiateRoute(service, owner){
-  return serviceTemplate(service.id).map((s,i)=>{
-    const assignments=resolveStep(s,owner,service.id);
-    return {
+  const route=[];
+  serviceTemplate(service.id).forEach((s,i)=>{
+    const previousAssigneeIds=route.at(-1)?.assigneeIds||[];
+    const assignments=resolveStep(s,owner,service.id,{previousAssigneeIds});
+    route.push({
       id:s.id||`step-${i+1}`, label:s.label||`المرحلة ${i+1}`, resolverSnapshot:clone(s.resolver||{}), stageFields:clone(s.stageFields||[]),
       mode:s.mode||'SEQUENTIAL', assignments, assigneeIds:assignments.map(a=>a.userId), state:'waiting', approvals:[]
-    };
+    });
   });
+  return route;
 }
 
 function createNotification(userId, requestId, type, title, body, stepId=null){
@@ -198,13 +219,13 @@ function holderNames(req){
 }
 
 function setUser(id){
-  state.user=userById(id); save(KEYS.user,state.user); state.panel='home'; state.activeRequestId=null; render();
+  state.user=userById(id); save(KEYS.user,state.user); state.messages=loadUserMessages(id); state.panel='home'; state.activeRequestId=null; state.activeServiceId=null; state.draft={}; render();
 }
-function logout(){localStorage.removeItem(KEYS.user);state.user=null;render()}
+function logout(){saveUserMessages();localStorage.removeItem(KEYS.user);state.user=null;state.messages=defaultMessages();state.activeServiceId=null;state.activeRequestId=null;state.draft={};render()}
 function navigate(panel){state.panel=panel;state.activeServiceId=null;state.activeRequestId=null;state.editRequestId=null;render()}
 function openService(id){state.activeServiceId=id;state.panel='service';render()}
 function openRequest(id){const r=state.requests.find(x=>x.id===id);if(r&&canViewRequest(r)){state.activeRequestId=id;state.panel='request';render()}}
-function startService(id){state.activeServiceId=id;state.draft={};state.editRequestId=null;state.wizardStep=1;state.panel='new-request';render()}
+function startService(id,prefill={}){state.activeServiceId=id;state.draft=clone(prefill||{});state.editRequestId=null;state.wizardStep=1;state.panel='new-request';render()}
 
 function normalizeArabic(value=''){
   return String(value).toLowerCase()
@@ -218,8 +239,34 @@ function serviceSearchText(service){
     ...(service.aliases||[]), service.form?.templateName, service.form?.sourceFormat
   ].filter(Boolean).join(' '));
 }
+function intentResult(serviceId,text,prefill={},note=''){
+  const service=serviceById(serviceId);
+  if(!service)return null;
+  return {service,prefill,text:note||`تعرفت على طلبك كخدمة: ${service.name} (${service.code}). سأفتح لك الحقول المناسبة للحالة فقط، ثم يذهب الطلب بالتسلسل إلى المسؤول الحالي.`};
+}
+function includesAny(q,patterns){return patterns.some(p=>q.includes(normalizeArabic(p)))}
 function localAI(text){
   const q=normalizeArabic(text); if(!q)return {text:'اكتب طلبك أو اسم النموذج.'};
+
+  // نميز أولا بين إذن مستقبلي وبين تصحيح حضور حدث فعلا.
+  const permissionFuture=['بستأذن','بستاذن','استأذن','استاذن','ابي اطلع','أبي أطلع','احتاج اطلع','أحتاج أطلع','بطلع','موعد شخصي','اذن ساعت','إذن ساعت','استئذان'];
+  const attendancePast=['تأخرت','تاخرت','نسيت البصمه','نسيت البصمة','نسيت بصمه','نسيت بصمة','ما بصمت','لم ابصم','طلعت بدري','خرجت بدري','غبت','غيبت','كنت غايب','كنت غائب','غايب','عملت عن بعد','داومت عن بعد','تعديل الحضور','تصحيح الحضور','مذكره حضور','مذكرة حضور'];
+  const explicitPermission=includesAny(q,permissionFuture);
+  const explicitAttendance=includesAny(q,attendancePast);
+
+  if(explicitPermission && !explicitAttendance){
+    return intentResult('short-permission',text,{},'فهمت أنك تريد استئذانا/إذنا قصيرا، وليس مذكرة حضور. مذكرة الحضور مخصصة لتصحيح حالة حدثت فعليا ولا تستخدم بديلا عن الإذن القصير.');
+  }
+  if(explicitAttendance){
+    const prefill={};
+    if(includesAny(q,['تأخرت','تاخرت','تأخير']))prefill.caseType='متأخر';
+    else if(includesAny(q,['نسيت البصمه','نسيت البصمة','نسيت بصمه','نسيت بصمة','ما بصمت','لم ابصم'])){prefill.caseType='لم يبصم';if(q.includes('الخروج'))prefill.missedPunchType='بصمة الخروج';else if(q.includes('الدخول'))prefill.missedPunchType='بصمة الدخول';}
+    else if(includesAny(q,['طلعت بدري','خرجت بدري','خروج مبكر']))prefill.caseType='خروج مبكر';
+    else if(includesAny(q,['غبت','غيبت','كنت غايب','كنت غائب']))prefill.caseType='غائب';
+    else if(includesAny(q,['عملت عن بعد','داومت عن بعد','عمل عن بعد']))prefill.caseType='العمل عن بعد';
+    return intentResult('attendance-memo',text,prefill,'هذه حالة حضور حدثت فعليا، لذلك الخدمة المناسبة هي مذكرة الحضور HR-F-25. سأعرض فقط الحقول التي تخص نوع الحالة ولن أطلب أوقاتا غير لازمة.');
+  }
+
   const words=q.split(' ').filter(w=>w.length>1);
   const ranked=services.filter(s=>s.active).map(service=>{
     const hay=serviceSearchText(service); let score=0;
@@ -230,26 +277,73 @@ function localAI(text){
     return {service,score};
   }).sort((a,b)=>b.score-a.score);
   const best=ranked[0];
-  if(!best||best.score<2)return {text:'لم أجد خدمة مؤكدة من سجل الخدمات والنماذج المعرف حاليا. ابحث يدويا أو اطلب من الموارد البشرية تسجيل النموذج الجديد في مركز النماذج.'};
-  const service=best.service;
-  return {text:`تعرفت على طلبك كخدمة: ${service.name} (${service.code}). النموذج ${service.form?.sourceFormat||'المعتمد'} مرتبط بالخدمة، وسأطلب فقط البيانات الخاصة بجزء الموظف ثم ينتقل كل جزء لمسؤوله.`,service};
+  if(!best||best.score<2)return {text:'لم أجد تطابقا موثوقا. اكتب ما حدث أو ما تريد فعله، مثلا: بستأذن ساعتين، تأخرت اليوم، نسيت بصمة الخروج، أريد بدل سكن.'};
+  return intentResult(best.service.id,text,{},`الخدمة الأقرب هي: ${best.service.name} (${best.service.code}). راجعها قبل البدء، ولن أفترض بيانات غير موجودة.`);
 }
-function submitAI(value){const text=value??document.querySelector('#aiInput')?.value;if(!text?.trim())return;state.messages.push({role:'user',text:text.trim()});const r=localAI(text);state.messages.push({role:'ai',text:r.text,service:r.service});state.panel='assistant';render()}
+function submitAI(value){
+  const text=value??document.querySelector('#aiInput')?.value;if(!text?.trim())return;
+  state.messages.push({role:'user',text:text.trim()});
+  const r=localAI(text);
+  state.messages.push({role:'ai',text:r.text,service:r.service,prefill:r.prefill||{}});
+  saveUserMessages();state.panel='assistant';render();
+}
 
-function fieldControl(f,value=''){
-  const v=h(value),req=f.required?'required':'';
+function conditionMatches(condition,data={}){
+  if(!condition)return true;
+  const value=data?.[condition.field]??'';
+  if(Object.prototype.hasOwnProperty.call(condition,'equals'))return value===condition.equals;
+  if(Array.isArray(condition.in))return condition.in.includes(value);
+  if(Object.prototype.hasOwnProperty.call(condition,'notEquals'))return value!==condition.notEquals;
+  return true;
+}
+function fieldVisible(f,data={}){
+  if(f.showWhen&&!conditionMatches(f.showWhen,data))return false;
+  if(Array.isArray(f.showWhenAny)&&f.showWhenAny.length&&!f.showWhenAny.some(c=>conditionMatches(c,data)))return false;
+  return true;
+}
+function fieldRequired(f,data={}){
+  if(f.required)return true;
+  if(f.requiredWhen&&conditionMatches(f.requiredWhen,data))return true;
+  if(Array.isArray(f.requiredWhenAny)&&f.requiredWhenAny.some(c=>conditionMatches(c,data)))return true;
+  return false;
+}
+function attachmentMeta(item){return typeof item==='string'?{id:item,label:item,required:true,accept:'.pdf,.png,.jpg,.jpeg'}:item}
+function attachmentVisible(item,data={}){const a=attachmentMeta(item);return !a.showWhen||conditionMatches(a.showWhen,data)}
+function attachmentRequired(item,data={}){const a=attachmentMeta(item);return !!a.required||!!(a.requiredWhen&&conditionMatches(a.requiredWhen,data))}
+function visibleFields(service,data={}){return (service.fields||[]).filter(f=>fieldVisible(f,data))}
+function visibleAttachments(service,data={}){return (service.attachments||[]).map(attachmentMeta).filter(a=>attachmentVisible(a,data))}
+function fieldControl(f,value='',data={}){
+  const v=h(value),req=fieldRequired(f,data)?'required':'';
   if(f.type==='select')return `<select name="${f.id}" ${req}><option value="">اختر</option>${f.options.map(o=>`<option value="${h(o)}" ${o===value?'selected':''}>${h(o)}</option>`).join('')}</select>`;
   if(f.type==='textarea')return `<textarea name="${f.id}" ${req} placeholder="${h(f.placeholder||'')}">${v}</textarea>`;
   return `<div class="input-wrap"><input type="${f.type}" name="${f.id}" value="${v}" ${req} placeholder="${h(f.placeholder||'')}"/>${f.suffix?`<span>${h(f.suffix)}</span>`:''}</div>`;
 }
+function syncDraftFromForm(){
+  const service=serviceById(state.activeServiceId);const form=document.querySelector('#requestForm');if(!service||!form)return;
+  const next={...state.draft};
+  (service.fields||[]).forEach(f=>{const el=form.elements[f.id];if(el)next[f.id]=el.value??''});
+  state.draft=next;
+}
 function collectDraft(){
   const service=serviceById(state.activeServiceId); const form=document.querySelector('#requestForm'); if(!service||!form)return;
-  const data={}; let ok=true;
-  service.fields.forEach(f=>{const el=form.elements[f.id];const v=el?.value?.trim?.()??'';if(f.required&&!v){el.classList.add('invalid');ok=false}else el?.classList.remove('invalid');data[f.id]=v});
-  const attachments={}; (service.attachments||[]).forEach(label=>{const el=form.querySelector(`[data-attachment="${CSS.escape(label)}"]`);const existing=state.draft.attachments?.[label]||'';const name=el?.files?.[0]?.name||existing;if(!name){el?.classList.add('invalid');ok=false}else el?.classList.remove('invalid');attachments[label]=name});
-  if(!ok){toast('أكمل الحقول والمرفقات المطلوبة','error');return}
-  state.draft={...data,attachments};state.wizardStep=2;render();
+  const data={...state.draft}; let ok=true;
+  (service.fields||[]).forEach(f=>{
+    const visible=fieldVisible(f,data);const el=form.elements[f.id];
+    if(!visible){data[f.id]='';return}
+    const v=el?.value?.trim?.()??'';data[f.id]=v;
+    if(fieldRequired(f,{...data,[f.id]:v})&&!v){el?.classList.add('invalid');ok=false}else el?.classList.remove('invalid');
+  });
+  const attachments={...(state.draft.attachments||{})};
+  visibleAttachments(service,data).forEach(a=>{
+    const el=form.querySelector(`[data-attachment-id="${CSS.escape(a.id)}"]`);
+    const existing=attachments[a.id]||'';const name=el?.files?.[0]?.name||existing;
+    attachments[a.id]=name;
+    if(attachmentRequired(a,data)&&!name){el?.classList.add('invalid');ok=false}else el?.classList.remove('invalid');
+  });
+  if(!ok){toast('أكمل فقط البيانات المطلوبة لهذه الحالة','error');return}
+  data.attachments=attachments;state.draft=data;state.wizardStep=2;render();
 }
+
 function editReturned(id){
   const req=state.requests.find(r=>r.id===id); if(!req||req.ownerId!==state.user.id||req.returnContext?.type!=='owner')return;
   state.activeServiceId=req.serviceId;state.editRequestId=id;state.draft=clone(req.formData);state.wizardStep=1;state.panel='new-request';render();
@@ -336,6 +430,7 @@ function resolverPreset(r){
   if(r.type==='NAMED_USER')return `USER:${r.userId}`;
   if(r.type==='DEPARTMENT_MANAGER_FIXED')return `DEPT_MANAGER:${r.departmentId}`;
   if(r.type==='ROLE_IN_DEPARTMENT')return `ROLE:${r.departmentId}:${r.role}`;
+  if(r.type==='HR_RESPONSIBLE')return `HR_RESPONSIBLE:${r.preferredUserId||'E001'}`;
   return 'DIRECT_MANAGER';
 }
 function presetResolver(value){
@@ -346,10 +441,11 @@ function presetResolver(value){
   if(t==='SMART_USER'){const parts=value.split(':');return {type:'NAMED_USER',userId:parts[1],excludeOwner:true,fallbackRole:parts[2]||'specialist',departmentId:parts[3]||'hr'}};
   if(t==='DEPT_MANAGER')return {type:'DEPARTMENT_MANAGER_FIXED',departmentId:a};
   if(t==='ROLE')return {type:'ROLE_IN_DEPARTMENT',departmentId:a,role:b};
+  if(t==='HR_RESPONSIBLE')return {type:'HR_RESPONSIBLE',preferredUserId:a||'E001'};
   return {type:'DIRECT_MANAGER'};
 }
 function workflowPresetOptions(selected=''){
-  const opts=[['DIRECT_MANAGER','المدير المباشر'],['GENERAL_MANAGER','المدير العام'],['SMART_USER:E001:specialist:hr','نادر الجهني (مع بديل تلقائي إذا كان هو مقدم الطلب)'],['USER:E001','نادر الجهني'],['USER:E002','أحمد'],['USER:HRM01','مدير الموارد البشرية'],['DEPT_MANAGER:hr','مدير الموارد البشرية'],['DEPT_MANAGER:accounting','مدير المحاسبة'],['DEPT_MANAGER:training','مدير التدريب'],['ROLE:hr:specialist','أي مختص موارد بشرية - نفس المرحلة']];
+  const opts=[['DIRECT_MANAGER','المدير المباشر'],['GENERAL_MANAGER','المدير العام'],['HR_RESPONSIBLE:E001','المختص المسؤول في الموارد البشرية (نادر افتراضيا مع بديل تلقائي)'],['SMART_USER:E001:specialist:hr','نادر الجهني (مع بديل تلقائي إذا كان هو مقدم الطلب)'],['USER:E001','نادر الجهني'],['USER:E002','أحمد'],['USER:HRM01','مدير الموارد البشرية'],['DEPT_MANAGER:hr','مدير الموارد البشرية'],['DEPT_MANAGER:accounting','مدير المحاسبة'],['DEPT_MANAGER:training','مدير التدريب'],['ROLE:hr:specialist','أي مختص موارد بشرية - نفس المرحلة']];
   return opts.map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${h(l)}</option>`).join('');
 }
 function saveWorkflowTemplate(serviceId){
@@ -393,21 +489,38 @@ function housingControlledSection(req){
   ];
   return `<div class="doc-section"><h4>حقول المراجعة الداخلية في HR-F-29</h4><div class="doc-grid">${fields.map(([id,label])=>`<div class="doc-field"><span>${h(label)}</span><strong>${h(stageDataValue(req,id)||'يعبأ في مرحلته المختصة')}</strong></div>`).join('')}</div></div>`;
 }
+function formatTime12(value){
+  if(!value)return 'غير مدخل';
+  const [hh,mm='00']=String(value).split(':');const n=Number(hh);if(Number.isNaN(n))return value;
+  const period=n<12?'ص':'م';const hour=n%12||12;return `${hour}:${mm} ${period}`;
+}
+function displayFieldValue(f,value){
+  if(value===undefined||value===null||String(value).trim()==='')return 'غير مدخل';
+  if(f.type==='time')return formatTime12(value);
+  return String(value);
+}
+function previewAttachmentRows(service,data={}){
+  const items=visibleAttachments(service,data);if(!items.length)return '';
+  return `<div class="doc-section"><h4>المرفقات</h4><div class="doc-grid">${items.map(a=>`<div class="doc-field"><span>${h(a.label)}</span><strong>${h(data.attachments?.[a.id]||'لم يرفق')}</strong></div>`).join('')}</div></div>`;
+}
 function formPreview(service, reqData, req=null){
-  const owner=req?userById(req.ownerId):state.user; const signatures=req?.requesterSignatures||[]; const latestRequester=[...signatures].reverse().find(s=>s.valid);
+  const data=reqData||{};const owner=req?userById(req.ownerId):state.user; const signatures=req?.requesterSignatures||[]; const latestRequester=[...signatures].reverse().find(s=>s.valid);
   const route=req?.route||instantiateRoute(service,owner);
-  const fieldRows=service.fields.map(f=>`<div class="doc-field"><span>${h(f.label)}</span><strong>${h(reqData?.[f.id]||'-')}${f.suffix&&reqData?.[f.id]?` ${h(f.suffix)}`:''}</strong></div>`).join('');
+  const fields=visibleFields(service,data);
+  const fieldRows=fields.map(f=>`<div class="doc-field"><span>${h(f.label)}</span><strong>${h(displayFieldValue(f,data?.[f.id]))}${f.suffix&&data?.[f.id]?` ${h(f.suffix)}`:''}</strong></div>`).join('');
   const approvals=route.map((s,i)=>{
     const a=[...(s.approvals||[])].reverse().find(x=>x.valid);
-    return `<div class="approval-box"><span>${i+1}. ${h(s.label)}</span>${a?`<strong>تم الاعتماد إلكترونيا</strong><small>${h(a.signature.name)} - ${h(a.signature.title)}</small><small>${fmt(a.signature.at)}</small>${a.note?`<em>ملاحظة: ${h(a.note)}</em>`:''}`:`<strong class="muted">بانتظار الاعتماد</strong><small>${h(assigneeDisplay(s))}</small>`}</div>`;
+    return `<div class="approval-box"><span>${i+1}. ${h(s.label)}</span>${a?`<strong>تم الاعتماد إلكترونيا</strong><small>${h(a.signature.name)} - ${h(a.signature.title)}</small><small>${fmt(a.signature.at)}</small>${a.note?`<em>ملاحظة: ${h(a.note)}</em>`:''}`:`<strong class="muted">بانتظار وصول الدور</strong><small>${h(assigneeDisplay(s)||'سيحدد حسب المسار')}</small>`}</div>`;
   }).join('');
   return `<div class="document-preview">
-    <div class="doc-top"><div><strong>${h(service.form.templateName)}</strong><small>نموذج داخلي مرتبط بالمعاملة</small></div><div class="doc-ref"><span>${h(service.code)}</span><span>Revision ${h(service.form.revision||'-')}</span></div></div>
-    <div class="doc-section"><h4>بيانات الموظف</h4><div class="doc-grid"><div class="doc-field"><span>الاسم</span><strong>${h(owner?.name||'-')}</strong></div><div class="doc-field"><span>الرقم الوظيفي</span><strong>${h(owner?.id||'-')}</strong></div><div class="doc-field"><span>القسم</span><strong>${h(deptName(owner?.departmentId))}</strong></div><div class="doc-field"><span>المسمى</span><strong>${h(owner?.title||'-')}</strong></div>${fieldRows}</div></div>
-    <div class="doc-section declaration"><h4>الإقرار</h4><p>${h(service.form.declaration||'أقر بصحة البيانات الواردة في الطلب.')}</p>${latestRequester?`<div class="e-sign"><strong>اعتماد الموظف إلكترونيا</strong><span>${h(latestRequester.name)} - ${h(latestRequester.title)}</span><span>${fmt(latestRequester.at)} · ${h(req?.id||'مسودة')}</span></div>`:'<div class="e-sign pending-sign">سيتم تسجيل اعتماد الموظف الإلكتروني عند الإرسال</div>'}</div>
+    <div class="doc-top"><div><strong>${h(service.form.templateName)}</strong><small>معاينة منظمة للبيانات التي ستكتب في النموذج المعتمد</small></div><div class="doc-ref"><span>${h(service.code)}</span><span>Revision ${h(service.form.revision||'غير محدد')}</span></div></div>
+    <div class="doc-section"><h4>بيانات الموظف</h4><div class="doc-grid"><div class="doc-field"><span>الاسم</span><strong>${h(owner?.name||'غير معروف')}</strong></div><div class="doc-field"><span>الرقم الوظيفي</span><strong>${h(owner?.id||'غير معروف')}</strong></div><div class="doc-field"><span>القسم</span><strong>${h(deptName(owner?.departmentId)||'غير معروف')}</strong></div><div class="doc-field"><span>المسمى</span><strong>${h(owner?.title||'غير معروف')}</strong></div></div></div>
+    <div class="doc-section"><h4>${service.id==='attendance-memo'?'تفاصيل حالة الحضور':'بيانات الطلب'}</h4><div class="doc-grid">${fieldRows||'<div class="doc-field"><span>البيانات</span><strong>بانتظار الإدخال</strong></div>'}</div></div>
+    ${previewAttachmentRows(service,data)}
+    <div class="doc-section declaration"><h4>الإقرار</h4><p>${h(service.form.declaration||'أقر بصحة البيانات الواردة في الطلب.')}</p>${latestRequester?`<div class="e-sign"><strong>اعتماد الموظف إلكترونيا</strong><span>${h(latestRequester.name)} - ${h(latestRequester.title)}</span><span>${fmt(latestRequester.at)} · ${h(req?.id||'مسودة')}</span></div>`:'<div class="e-sign pending-sign">سيتم تسجيل اسم الموظف والحساب والتاريخ عند الإرسال</div>'}</div>
     ${service.id==='housing'?housingControlledSection(req):''}
-    <div class="doc-section"><h4>سجل الاعتمادات على النموذج</h4><div class="approval-grid">${approvals}</div></div>
-    ${service.form.masterPath?`<div class="doc-master">الملف الأصلي Master مرتبط بالخدمة ولا يتم تعديل الأصل. <a href="${encodeURI(service.form.masterPath)}" target="_blank">فتح ملف النموذج الأصلي</a></div>`:''}
+    <div class="doc-section"><h4>سجل الاعتمادات</h4><div class="approval-grid">${approvals}</div></div>
+    ${service.form.masterPath?`<div class="doc-master">الملف المعتمد محفوظ كـ Master ولا يتم تعديل الأصل. <a href="${encodeURI(service.form.masterPath)}" target="_blank">فتح الملف المعتمد</a></div>`:''}
   </div>`;
 }
 
@@ -431,20 +544,42 @@ function homePanel(){
   const mine=state.requests.filter(r=>r.ownerId===state.user.id); const returned=mine.filter(r=>r.status==='returned'&&r.returnContext?.type==='owner').length;
   return `<section><div class="hero"><span class="ai-pill">NDR AI · مساعد الخدمة</span><h2>ماذا تريد أن تنجز اليوم؟</h2><p>اكتب طلبك بطريقتك. الذكاء يوجهك، لكن كل خدمة تعمل يدويا حتى عند تعطل مزود AI.</p><div class="ask"><textarea id="aiInput" placeholder="مثال: أحتاج إذن ساعتين غدا"></textarea><button class="primary" id="askBtn">ابدأ</button></div><div class="chips">${['أريد بدل سكن','تأخرت وأحتاج مذكرة حضور','عندي إجازة مرضية','أحتاج إذن ساعتين'].map(x=>`<button class="chip ai-chip">${x}</button>`).join('')}</div></div>${returned?`<div class="urgent-banner"><strong>لديك ${returned} طلب يحتاج استكمال</strong><span>تمت إعادته لك من مسار الموافقات. افتح طلباتي لاستكماله وإعادة الإرسال.</span><button class="outline" data-panel="my-requests">فتح طلباتي</button></div>`:''}<div class="dash-grid"><div class="card"><div class="card-head"><div><h3>طلباتي الأخيرة</h3><span>الحالة والمسؤول الحالي</span></div><button class="text-btn" data-panel="my-requests">عرض الكل</button></div>${mine.slice(0,3).map(requestRow).join('')||'<div class="empty">لا توجد طلبات حتى الآن</div>'}</div><div class="card"><div class="card-head"><div><h3>خدمات سريعة</h3><span>مسارات تلقائية قابلة للضبط</span></div><button class="text-btn" data-panel="services">كل الخدمات</button></div>${services.filter(s=>s.active).slice(0,3).map(s=>`<div class="quick-service"><div><strong>${h(s.name)}</strong><small>${serviceTemplate(s.id).length} مراحل اعتماد</small></div><button class="outline start-service" data-service="${s.id}">ابدأ</button></div>`).join('')}</div></div></section>`;
 }
-function assistantPanel(){return `<section class="assistant-layout"><div class="chat card"><div class="chat-head"><span class="ai-icon">✦</span><div><strong>NDR AI</strong><small>محرك توجيه محلي حاليا</small></div></div><div class="messages">${state.messages.map(m=>`<div class="msg ${m.role}">${h(m.text)}${m.service?`<div class="actions"><button class="primary start-service" data-service="${m.service.id}">ابدأ الخدمة</button><button class="outline open-service" data-service="${m.service.id}">تفاصيل</button></div>`:''}</div>`).join('')}</div><div class="chat-send"><input id="chatInput" placeholder="اكتب ما تحتاجه"><button class="primary" id="chatSend">إرسال</button></div></div><aside class="side-stack"><div class="card"><h3>قاعدة مهمة</h3><p class="muted">NDR AI لا يقرر من يعتمد الطلب. مسار الموافقات يأتي من محرك Workflow المحدد للخدمة ويستمر حتى لو تعطل AI.</p></div><div class="card"><h3>الخصوصية</h3><p class="muted">في الإنتاج لن ترسل للذكاء إلا أقل قدر لازم من البيانات وبحسب صلاحية الوثائق.</p></div></aside></section>`}
+function assistantPanel(){return `<section class="assistant-layout"><div class="chat card"><div class="chat-head"><span class="ai-icon">✦</span><div><strong>NDR AI</strong><small>محادثة خاصة بحساب ${h(state.user.name)}</small></div></div><div class="messages">${state.messages.map(m=>`<div class="msg ${m.role}">${h(m.text)}${m.service?`<div class="actions"><button class="primary start-service" data-service="${m.service.id}" data-prefill="${encodeURIComponent(JSON.stringify(m.prefill||{}))}">ابدأ الخدمة</button><button class="outline open-service" data-service="${m.service.id}">تفاصيل</button></div>`:''}</div>`).join('')}</div><div class="chat-send"><input id="chatInput" placeholder="مثال: بستأذن ساعتين غدا، أو تأخرت اليوم"><button class="primary" id="chatSend">إرسال</button></div></div><aside class="side-stack"><div class="card"><h3>فهم النية</h3><p class="muted">النظام يفرق بين طلب مستقبلي مثل الاستئذان وبين تصحيح حضور حدث فعليا مثل التأخر أو البصمة المفقودة.</p></div><div class="card"><h3>الخصوصية</h3><p class="muted">محادثات هذا الحساب منفصلة عن بقية الموظفين ولا تظهر عند تسجيل الدخول بحساب آخر.</p></div></aside></section>`}
 function servicesPanel(){return `<section><div class="section-head"><div><h2>دليل الخدمات</h2><p>كل خدمة لها نموذج ومسار مستقل ويمكن تعديل المسار من الإدارة.</p></div><input class="search" id="serviceSearch" placeholder="ابحث عن خدمة أو نموذج"></div><div class="service-grid" id="serviceGrid">${services.filter(s=>s.active).map(serviceCard).join('')}</div></section>`}
 function servicePanel(){
   const s=serviceById(state.activeServiceId); if(!s)return servicesPanel(); const route=serviceTemplate(s.id);
   return `<section><div class="service-hero card"><div><span class="tag">${h(deptName(s.departmentId))}</span><h2>${h(s.name)}</h2><p>${h(s.description)}</p><div class="actions"><button class="primary start-service" data-service="${s.id}">إنشاء طلب</button>${s.form.masterPath?`<a class="outline link-btn" href="${encodeURI(s.form.masterPath)}" target="_blank">فتح النموذج الأصلي</a>`:''}</div></div><div class="service-meta"><div><span>النموذج</span><strong>${h(s.code)}</strong></div><div><span>الإجراء</span><strong>${h(s.procedure)}</strong></div><div><span>المسار</span><strong>${route.length} مراحل</strong></div><div><span>صيغة النموذج</span><strong>${h(s.form.sourceFormat||'رقمي')}</strong></div></div></div><div class="detail-grid"><div class="card"><h3>المسار التلقائي الحالي</h3><div class="route-list">${route.map((x,i)=>`<div><b>${i+1}</b><span><strong>${h(x.label)}</strong><small>${h(resolverText(x.resolver))}${x.mode!=='SEQUENTIAL'?` · ${x.mode}`:''}</small></span></div>`).join('')}</div></div><div class="card"><h3>بيانات يطلبها النظام</h3><div class="clean-list">${s.fields.map(f=>`<div>✓ ${h(f.label)}</div>`).join('')}${(s.attachments||[]).map(a=>`<div>+ ${h(a)}</div>`).join('')}</div></div></div></section>`
 }
 
+function renderRequestFields(service,data={}){
+  return visibleFields(service,data).map(f=>`<label class="field ${f.type==='textarea'?'wide':''}"><span>${h(f.label)}${fieldRequired(f,data)?' *':''}</span>${fieldControl(f,data[f.id]||'',data)}</label>`).join('');
+}
+function renderRequestAttachments(service,data={}){
+  const items=visibleAttachments(service,data);if(!items.length)return '';
+  return `<div class="attachments"><h3>المرفقات لهذه الحالة</h3>${items.map(a=>`<label class="upload"><span>＋</span><div><strong>${h(a.label)}${attachmentRequired(a,data)?' *':''}</strong><small>${data.attachments?.[a.id]?`الملف الحالي: ${h(data.attachments[a.id])}`:'PDF أو صورة'}</small></div><input type="file" data-attachment-id="${h(a.id)}" accept="${h(a.accept||'.pdf,.png,.jpg,.jpeg')}"></label>`).join('')}</div>`;
+}
+function attendanceGuidance(data={}){
+  if(state.activeServiceId!=='attendance-memo')return '';
+  const type=data.caseType;
+  const map={
+    'غائب':'حدد هل الغياب بعذر ومستند داعم أو بعذر دون مستند أو بدون عذر. لا نطلب أوقات الدخول والخروج للغياب.',
+    'متأخر':'أدخل وقت الدخول الفعلي فقط. وقت الخروج غير مطلوب لهذه الحالة.',
+    'خروج مبكر':'أدخل وقت الخروج الفعلي فقط. وقت الدخول غير مطلوب لهذه الحالة.',
+    'لم يبصم':'حدد أولا أي بصمة مفقودة، وسيظهر فقط الوقت المطلوب لاستكمالها.',
+    'العمل عن بعد':'حدد هل كان يوما كاملا أو جزءا من اليوم. الأوقات تظهر فقط عند اختيار جزء من اليوم.',
+    'أخرى':'اشرح الحالة بوضوح، ولن يطلب النظام أوقاتا ما لم تكن لازمة.'
+  };
+  return `<div class="notice smart-guidance"><strong>متطلبات الحالة</strong><span>${h(map[type]||'اختر نوع الحالة وسيكيف النظام البيانات المطلوبة تلقائيا.')}</span></div>`;
+}
 function newRequestPanel(){
   const s=serviceById(state.activeServiceId);if(!s)return servicesPanel(); const editing=!!state.editRequestId;
   if(state.wizardStep===2)return reviewPanel();
   const req=editing?state.requests.find(r=>r.id===state.editRequestId):null;
-  return `<section><div class="wizard-head"><div><span class="eyebrow">${editing?'استكمال طلب معاد':'طلب جديد'} · ${h(s.code)}</span><h2>${h(s.name)}</h2></div><div class="wizard"><b class="active">1 البيانات</b><b>2 النموذج والمراجعة</b><b>3 الإرسال</b></div></div>${editing?`<div class="return-box"><strong>سبب الإعادة</strong><span>${h(req.returnContext?.reason||'')}</span><small>المطلوب: ${h(scopeName(req.returnContext?.scope))}</small></div>`:''}<form id="requestForm" class="form-layout"><div class="card"><div class="prefill"><h3>بيانات من الحساب</h3><div><span>الاسم<strong>${h(state.user.name)}</strong></span><span>الرقم الوظيفي<strong>${h(state.user.id)}</strong></span><span>القسم<strong>${h(deptName(state.user.departmentId))}</strong></span><span>المدير المباشر<strong>${h(userById(state.user.managerId)?.name||'-')}</strong></span></div></div><div class="form-grid">${s.fields.map(f=>`<label class="field ${f.type==='textarea'?'wide':''}"><span>${h(f.label)}${f.required?' *':''}</span>${fieldControl(f,state.draft[f.id]||'')}</label>`).join('')}</div>${(s.attachments||[]).length?`<div class="attachments"><h3>المرفقات المطلوبة</h3>${s.attachments.map(a=>`<label class="upload"><span>＋</span><div><strong>${h(a)}</strong><small>${state.draft.attachments?.[a]?`الملف الحالي: ${h(state.draft.attachments[a])}`:'PDF أو صورة'}</small></div><input type="file" data-attachment="${h(a)}" accept=".pdf,.png,.jpg,.jpeg"></label>`).join('')}</div>`:''}<div class="form-actions"><button type="button" class="primary" id="reviewBtn">مراجعة النموذج</button></div></div><aside class="side-stack"><div class="card"><h3>المسار المتوقع</h3><div class="route-list small-route">${serviceTemplate(s.id).map((x,i)=>`<div><b>${i+1}</b><span><strong>${h(x.label)}</strong><small>${h(resolverText(x.resolver))}</small></span></div>`).join('')}</div></div><div class="notice">لن يصل إشعار لأي مرحلة مستقبلية. عند الإرسال يخطر المسؤول الأول فقط.</div></aside></form></section>`
+  const route=instantiateRoute(s,state.user);
+  return `<section><div class="wizard-head"><div><span class="eyebrow">${editing?'استكمال طلب معاد':'طلب جديد'} · ${h(s.code)}</span><h2>${h(s.name)}</h2></div><div class="wizard"><b class="active">1 البيانات</b><b>2 النموذج والمراجعة</b><b>3 الإرسال</b></div></div>${editing?`<div class="return-box"><strong>سبب الإعادة</strong><span>${h(req.returnContext?.reason||'')}</span><small>المطلوب: ${h(scopeName(req.returnContext?.scope))}</small></div>`:''}<form id="requestForm" class="form-layout"><div class="card"><div class="prefill"><h3>بيانات من الحساب</h3><div><span>الاسم<strong>${h(state.user.name)}</strong></span><span>الرقم الوظيفي<strong>${h(state.user.id)}</strong></span><span>القسم<strong>${h(deptName(state.user.departmentId))}</strong></span><span>المدير المباشر<strong>${h(userById(state.user.managerId)?.name||'غير معين')}</strong></span></div></div>${attendanceGuidance(state.draft)}<div class="form-grid">${renderRequestFields(s,state.draft)}</div>${renderRequestAttachments(s,state.draft)}<div class="form-actions"><button type="button" class="primary" id="reviewBtn">مراجعة النموذج</button></div></div><aside class="side-stack"><div class="card"><h3>المسار المتوقع لهذا الموظف</h3><div class="route-list small-route">${route.map((x,i)=>`<div><b>${i+1}</b><span><strong>${h(x.label)}</strong><small>${h(assigneeDisplay(x)||resolverText(x.resolverSnapshot))}</small></span></div>`).join('')}</div></div><div class="notice">عند الإرسال سيصل الإشعار للمرحلة الأولى فقط. بعد اعتمادها ينتقل تلقائيا للمرحلة التالية.</div></aside></form></section>`
 }
-function scopeName(v){return ({data:'تعديل البيانات',attachments:'استكمال المرفقات',stage_note:'استكمال ملاحظة المرحلة',other:'استكمال حسب الملاحظة'})[v]||v||'-'}
+
+function scopeName(v){return ({data:'تعديل البيانات',attachments:'استكمال المرفقات',stage_note:'استكمال ملاحظة المرحلة',other:'استكمال حسب الملاحظة'})[v]||v||'غير محدد'}
 function reviewPanel(){
   const s=serviceById(state.activeServiceId); const editing=!!state.editRequestId;
   return `<section><div class="wizard-head"><button class="back-btn" id="backToForm">رجوع للتعديل</button><div><span class="eyebrow">${editing?'إعادة إرسال بعد الاستكمال':'مراجعة قبل الإرسال'}</span><h2>راجع نفس النموذج الذي سيتحرك في مسار الموافقات</h2></div><div class="wizard"><b>1 البيانات</b><b class="active">2 النموذج والمراجعة</b><b>3 الإرسال</b></div></div><div class="review-layout"><div>${formPreview(s,state.draft,null)}</div><aside class="side-stack"><div class="card"><h3>الإقرار الإلكتروني</h3><label class="ack"><input type="checkbox" id="employeeAck"><span>${h(s.form.declaration)}</span></label><p class="muted">عند الإرسال يسجل النظام اسم الحساب والتاريخ ورقم المعاملة كاعتماد إلكتروني للموظف.</p><button class="primary full" id="submitBtn">${editing?'إعادة إرسال الطلب':'إرسال الطلب للموافقة'}</button><button class="outline full" id="backToForm2">تعديل البيانات</button></div></aside></div></section>`
@@ -524,7 +659,7 @@ function toast(message,type='success'){document.querySelector('.toast')?.remove(
 function bind(){
   document.querySelectorAll('[data-panel]').forEach(x=>x.onclick=()=>navigate(x.dataset.panel));
   document.querySelectorAll('.open-service').forEach(x=>x.onclick=()=>openService(x.dataset.service));
-  document.querySelectorAll('.start-service').forEach(x=>x.onclick=()=>startService(x.dataset.service));
+  document.querySelectorAll('.start-service').forEach(x=>x.onclick=()=>{let prefill={};try{prefill=x.dataset.prefill?JSON.parse(decodeURIComponent(x.dataset.prefill)):{};}catch{}startService(x.dataset.service,prefill)});
   document.querySelectorAll('[data-request]').forEach(x=>x.onclick=()=>openRequest(x.dataset.request));
   document.querySelector('#logoutBtn')?.addEventListener('click',logout);
   document.querySelector('#askBtn')?.addEventListener('click',()=>submitAI());
@@ -532,6 +667,13 @@ function bind(){
   document.querySelector('#chatSend')?.addEventListener('click',()=>submitAI(document.querySelector('#chatInput').value));
   document.querySelector('#chatInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();submitAI(e.target.value)}});
   document.querySelector('#serviceSearch')?.addEventListener('input',e=>{const q=e.target.value.toLowerCase();document.querySelector('#serviceGrid').innerHTML=services.filter(s=>s.active&&serviceSearchText(s).includes(normalizeArabic(q))).map(serviceCard).join('')||'<div class="empty">لا توجد نتائج</div>';bind()});
+  const currentService=serviceById(state.activeServiceId);
+  const driverIds=new Set();
+  (currentService?.fields||[]).forEach(f=>{
+    [f.showWhen,f.requiredWhen,...(f.showWhenAny||[]),...(f.requiredWhenAny||[])].filter(Boolean).forEach(c=>driverIds.add(c.field));
+  });
+  (currentService?.attachments||[]).map(attachmentMeta).forEach(a=>[a.showWhen,a.requiredWhen].filter(Boolean).forEach(c=>driverIds.add(c.field)));
+  driverIds.forEach(id=>document.querySelector(`#requestForm [name="${id}"]`)?.addEventListener('change',()=>{syncDraftFromForm();render()}));
   document.querySelector('#reviewBtn')?.addEventListener('click',collectDraft);
   document.querySelector('#backToForm')?.addEventListener('click',()=>{state.wizardStep=1;render()});
   document.querySelector('#backToForm2')?.addEventListener('click',()=>{state.wizardStep=1;render()});
