@@ -161,10 +161,13 @@ function canViewRequest(req){
   if(hasPermission('view_department'))return userById(req.ownerId)?.departmentId===state.user.departmentId;
   return false;
 }
+function isHRWorkflowController(){
+  return state.user?.departmentId==='hr' && ['employee','specialist','manager'].includes(state.user?.role);
+}
 function canOverrideRoute(req){
   if(!state.user)return false;
   if(hasPermission('workflow_override_all'))return true;
-  if(hasPermission('workflow_override_hr') && serviceById(req.serviceId)?.departmentId==='hr')return true;
+  if(isHRWorkflowController() && serviceById(req.serviceId)?.departmentId==='hr')return true;
   return false;
 }
 
@@ -203,15 +206,33 @@ function openService(id){state.activeServiceId=id;state.panel='service';render()
 function openRequest(id){const r=state.requests.find(x=>x.id===id);if(r&&canViewRequest(r)){state.activeRequestId=id;state.panel='request';render()}}
 function startService(id){state.activeServiceId=id;state.draft={};state.editRequestId=null;state.wizardStep=1;state.panel='new-request';render()}
 
+function normalizeArabic(value=''){
+  return String(value).toLowerCase()
+    .replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه')
+    .replace(/[ًٌٍَُِّْـ]/g,'').replace(/[^a-z0-9؀-ۿ\s-]/g,' ')
+    .replace(/\s+/g,' ').trim();
+}
+function serviceSearchText(service){
+  return normalizeArabic([
+    service.name, service.code, service.procedure, service.description,
+    ...(service.aliases||[]), service.form?.templateName, service.form?.sourceFormat
+  ].filter(Boolean).join(' '));
+}
 function localAI(text){
-  const q=text.trim().toLowerCase(); let id=null;
-  if(q.includes('سكن'))id='housing';
-  else if(q.includes('مرضي')||q.includes('تقرير طبي'))id='sick-leave';
-  else if(q.includes('اذن')||q.includes('إذن')||q.includes('ساعت'))id='short-permission';
-  else if(q.includes('شهادة')||q.includes('دورة')||q.includes('shrm'))id='cert-support';
-  else if(q.includes('رحلة')||q.includes('سفر')||q.includes('خارج جدة'))id='business-trip';
-  const service=serviceById(id);
-  return service?{text:`الخدمة الأقرب هي: ${service.name}. سأفتح لك الخدمة والمسار المعرّف لها، ويمكنك مراجعة النموذج قبل الإرسال.`,service}:{text:'لم أجد خدمة مؤكدة من الخدمات المعرفة حاليا. استخدم البحث اليدوي ولن أفترض إجراء غير معرف.'};
+  const q=normalizeArabic(text); if(!q)return {text:'اكتب طلبك أو اسم النموذج.'};
+  const words=q.split(' ').filter(w=>w.length>1);
+  const ranked=services.filter(s=>s.active).map(service=>{
+    const hay=serviceSearchText(service); let score=0;
+    (service.aliases||[]).forEach(alias=>{const a=normalizeArabic(alias);if(a&&q.includes(a))score+=12});
+    if(q.includes(normalizeArabic(service.name)))score+=15;
+    if(q.includes(normalizeArabic(service.code)))score+=20;
+    words.forEach(w=>{if(hay.includes(w))score+=1});
+    return {service,score};
+  }).sort((a,b)=>b.score-a.score);
+  const best=ranked[0];
+  if(!best||best.score<2)return {text:'لم أجد خدمة مؤكدة من سجل الخدمات والنماذج المعرف حاليا. ابحث يدويا أو اطلب من الموارد البشرية تسجيل النموذج الجديد في مركز النماذج.'};
+  const service=best.service;
+  return {text:`تعرفت على طلبك كخدمة: ${service.name} (${service.code}). النموذج ${service.form?.sourceFormat||'المعتمد'} مرتبط بالخدمة، وسأطلب فقط البيانات الخاصة بجزء الموظف ثم ينتقل كل جزء لمسؤوله.`,service};
 }
 function submitAI(value){const text=value??document.querySelector('#aiInput')?.value;if(!text?.trim())return;state.messages.push({role:'user',text:text.trim()});const r=localAI(text);state.messages.push({role:'ai',text:r.text,service:r.service});state.panel='assistant';render()}
 
@@ -272,7 +293,10 @@ function rejectRequest(reqId,reason){
   createNotification(req.ownerId,req.id,'REJECTED','تم رفض طلبك',`${req.serviceName} - السبب: ${reason.trim()}`);persist();closeModal();toast('تم رفض الطلب','success');render();
 }
 function returnTargets(req){
-  const out=[{value:'owner',label:`${userById(req.ownerId)?.name} - مقدم الطلب`,type:'owner',index:-1,userId:req.ownerId}];
+  const ownerTarget={value:'owner',label:`${userById(req.ownerId)?.name} - مقدم الطلب`,type:'owner',index:-1,userId:req.ownerId};
+  // مدير القسم لا يغير المسار ولا يعيد إلا للموظف صاحب الطلب.
+  if(!isHRWorkflowController() && !hasPermission('workflow_override_all'))return [ownerTarget];
+  const out=[ownerTarget];
   for(let i=0;i<req.activeStepIndex;i++){
     const s=req.route[i]; const actors=[...new Set(validApprovals(s).map(a=>a.userId).concat(s.assigneeIds))];
     actors.forEach(id=>out.push({value:`step:${i}:${id}`,label:`${userById(id)?.name||id} - ${s.label}`,type:'step',index:i,userId:id}));
@@ -405,13 +429,13 @@ function serviceCard(s){const route=serviceTemplate(s.id);return `<article class
 
 function homePanel(){
   const mine=state.requests.filter(r=>r.ownerId===state.user.id); const returned=mine.filter(r=>r.status==='returned'&&r.returnContext?.type==='owner').length;
-  return `<section><div class="hero"><span class="ai-pill">NDR AI · مساعد الخدمة</span><h2>ماذا تريد أن تنجز اليوم؟</h2><p>اكتب طلبك بطريقتك. الذكاء يوجهك، لكن كل خدمة تعمل يدويا حتى عند تعطل مزود AI.</p><div class="ask"><textarea id="aiInput" placeholder="مثال: أحتاج إذن ساعتين غدا"></textarea><button class="primary" id="askBtn">ابدأ</button></div><div class="chips">${['أريد بدل سكن','عندي إجازة مرضية','أحتاج إذن ساعتين','أريد دعم شهادة مهنية'].map(x=>`<button class="chip ai-chip">${x}</button>`).join('')}</div></div>${returned?`<div class="urgent-banner"><strong>لديك ${returned} طلب يحتاج استكمال</strong><span>تمت إعادته لك من مسار الموافقات. افتح طلباتي لاستكماله وإعادة الإرسال.</span><button class="outline" data-panel="my-requests">فتح طلباتي</button></div>`:''}<div class="dash-grid"><div class="card"><div class="card-head"><div><h3>طلباتي الأخيرة</h3><span>الحالة والمسؤول الحالي</span></div><button class="text-btn" data-panel="my-requests">عرض الكل</button></div>${mine.slice(0,3).map(requestRow).join('')||'<div class="empty">لا توجد طلبات حتى الآن</div>'}</div><div class="card"><div class="card-head"><div><h3>خدمات سريعة</h3><span>مسارات تلقائية قابلة للضبط</span></div><button class="text-btn" data-panel="services">كل الخدمات</button></div>${services.filter(s=>s.active).slice(0,3).map(s=>`<div class="quick-service"><div><strong>${h(s.name)}</strong><small>${serviceTemplate(s.id).length} مراحل اعتماد</small></div><button class="outline start-service" data-service="${s.id}">ابدأ</button></div>`).join('')}</div></div></section>`;
+  return `<section><div class="hero"><span class="ai-pill">NDR AI · مساعد الخدمة</span><h2>ماذا تريد أن تنجز اليوم؟</h2><p>اكتب طلبك بطريقتك. الذكاء يوجهك، لكن كل خدمة تعمل يدويا حتى عند تعطل مزود AI.</p><div class="ask"><textarea id="aiInput" placeholder="مثال: أحتاج إذن ساعتين غدا"></textarea><button class="primary" id="askBtn">ابدأ</button></div><div class="chips">${['أريد بدل سكن','تأخرت وأحتاج مذكرة حضور','عندي إجازة مرضية','أحتاج إذن ساعتين'].map(x=>`<button class="chip ai-chip">${x}</button>`).join('')}</div></div>${returned?`<div class="urgent-banner"><strong>لديك ${returned} طلب يحتاج استكمال</strong><span>تمت إعادته لك من مسار الموافقات. افتح طلباتي لاستكماله وإعادة الإرسال.</span><button class="outline" data-panel="my-requests">فتح طلباتي</button></div>`:''}<div class="dash-grid"><div class="card"><div class="card-head"><div><h3>طلباتي الأخيرة</h3><span>الحالة والمسؤول الحالي</span></div><button class="text-btn" data-panel="my-requests">عرض الكل</button></div>${mine.slice(0,3).map(requestRow).join('')||'<div class="empty">لا توجد طلبات حتى الآن</div>'}</div><div class="card"><div class="card-head"><div><h3>خدمات سريعة</h3><span>مسارات تلقائية قابلة للضبط</span></div><button class="text-btn" data-panel="services">كل الخدمات</button></div>${services.filter(s=>s.active).slice(0,3).map(s=>`<div class="quick-service"><div><strong>${h(s.name)}</strong><small>${serviceTemplate(s.id).length} مراحل اعتماد</small></div><button class="outline start-service" data-service="${s.id}">ابدأ</button></div>`).join('')}</div></div></section>`;
 }
 function assistantPanel(){return `<section class="assistant-layout"><div class="chat card"><div class="chat-head"><span class="ai-icon">✦</span><div><strong>NDR AI</strong><small>محرك توجيه محلي حاليا</small></div></div><div class="messages">${state.messages.map(m=>`<div class="msg ${m.role}">${h(m.text)}${m.service?`<div class="actions"><button class="primary start-service" data-service="${m.service.id}">ابدأ الخدمة</button><button class="outline open-service" data-service="${m.service.id}">تفاصيل</button></div>`:''}</div>`).join('')}</div><div class="chat-send"><input id="chatInput" placeholder="اكتب ما تحتاجه"><button class="primary" id="chatSend">إرسال</button></div></div><aside class="side-stack"><div class="card"><h3>قاعدة مهمة</h3><p class="muted">NDR AI لا يقرر من يعتمد الطلب. مسار الموافقات يأتي من محرك Workflow المحدد للخدمة ويستمر حتى لو تعطل AI.</p></div><div class="card"><h3>الخصوصية</h3><p class="muted">في الإنتاج لن ترسل للذكاء إلا أقل قدر لازم من البيانات وبحسب صلاحية الوثائق.</p></div></aside></section>`}
 function servicesPanel(){return `<section><div class="section-head"><div><h2>دليل الخدمات</h2><p>كل خدمة لها نموذج ومسار مستقل ويمكن تعديل المسار من الإدارة.</p></div><input class="search" id="serviceSearch" placeholder="ابحث عن خدمة أو نموذج"></div><div class="service-grid" id="serviceGrid">${services.filter(s=>s.active).map(serviceCard).join('')}</div></section>`}
 function servicePanel(){
   const s=serviceById(state.activeServiceId); if(!s)return servicesPanel(); const route=serviceTemplate(s.id);
-  return `<section><div class="service-hero card"><div><span class="tag">${h(deptName(s.departmentId))}</span><h2>${h(s.name)}</h2><p>${h(s.description)}</p><div class="actions"><button class="primary start-service" data-service="${s.id}">إنشاء طلب</button>${s.form.masterPath?`<a class="outline link-btn" href="${encodeURI(s.form.masterPath)}" target="_blank">فتح النموذج الأصلي</a>`:''}</div></div><div class="service-meta"><div><span>النموذج</span><strong>${h(s.code)}</strong></div><div><span>الإجراء</span><strong>${h(s.procedure)}</strong></div><div><span>المسار</span><strong>${route.length} مراحل</strong></div></div></div><div class="detail-grid"><div class="card"><h3>المسار التلقائي الحالي</h3><div class="route-list">${route.map((x,i)=>`<div><b>${i+1}</b><span><strong>${h(x.label)}</strong><small>${h(resolverText(x.resolver))}${x.mode!=='SEQUENTIAL'?` · ${x.mode}`:''}</small></span></div>`).join('')}</div></div><div class="card"><h3>بيانات يطلبها النظام</h3><div class="clean-list">${s.fields.map(f=>`<div>✓ ${h(f.label)}</div>`).join('')}${(s.attachments||[]).map(a=>`<div>+ ${h(a)}</div>`).join('')}</div></div></div></section>`
+  return `<section><div class="service-hero card"><div><span class="tag">${h(deptName(s.departmentId))}</span><h2>${h(s.name)}</h2><p>${h(s.description)}</p><div class="actions"><button class="primary start-service" data-service="${s.id}">إنشاء طلب</button>${s.form.masterPath?`<a class="outline link-btn" href="${encodeURI(s.form.masterPath)}" target="_blank">فتح النموذج الأصلي</a>`:''}</div></div><div class="service-meta"><div><span>النموذج</span><strong>${h(s.code)}</strong></div><div><span>الإجراء</span><strong>${h(s.procedure)}</strong></div><div><span>المسار</span><strong>${route.length} مراحل</strong></div><div><span>صيغة النموذج</span><strong>${h(s.form.sourceFormat||'رقمي')}</strong></div></div></div><div class="detail-grid"><div class="card"><h3>المسار التلقائي الحالي</h3><div class="route-list">${route.map((x,i)=>`<div><b>${i+1}</b><span><strong>${h(x.label)}</strong><small>${h(resolverText(x.resolver))}${x.mode!=='SEQUENTIAL'?` · ${x.mode}`:''}</small></span></div>`).join('')}</div></div><div class="card"><h3>بيانات يطلبها النظام</h3><div class="clean-list">${s.fields.map(f=>`<div>✓ ${h(f.label)}</div>`).join('')}${(s.attachments||[]).map(a=>`<div>+ ${h(a)}</div>`).join('')}</div></div></div></section>`
 }
 
 function newRequestPanel(){
@@ -449,7 +473,7 @@ function organizationPanel(){
   return `<section><div class="section-head"><div><h2>الهيكل الإداري والتفويض</h2><p>مدير رئيسي لكل قسم وموظفون تابعون له، مع بديل مؤقت لا يعمل إلا خلال فترة التفويض.</p></div>${hasPermission('delegation_manage')?'<button class="primary" id="addDelegation">إنشاء تفويض</button>':''}</div><div class="org-grid">${departments.filter(d=>!['system'].includes(d.id)).map(d=>`<article class="card org-card"><div class="org-head"><div><span class="tag">${h(d.id)}</span><h3>${h(d.name)}</h3></div>${canManage?`<select class="dept-manager" data-dept="${d.id}">${users.filter(u=>u.departmentId===d.id||u.role==='executive').map(u=>`<option value="${u.id}" ${u.id===managerIdForDepartment(d.id)?'selected':''}>${h(u.name)}</option>`).join('')}</select>`:`<strong>${h(userById(managerIdForDepartment(d.id))?.name||'-')}</strong>`}</div><div class="member-list">${membersOfDepartment(d.id).map(u=>`<div><span class="avatar mini">${h(u.name.slice(0,1))}</span><div><strong>${h(u.name)}</strong><small>${h(u.title)}${u.id===managerIdForDepartment(d.id)?' · المدير الرئيسي':''}</small></div></div>`).join('')||'<span class="muted">لا توجد بيانات موظفين مضافة</span>'}</div></article>`).join('')}</div><div class="card delegation-card"><div class="card-head"><div><h3>التفويضات والبدلاء</h3><span>المسار يتحول للبديل تلقائيا فقط إذا كان التفويض ساريا ويطابق الخدمة.</span></div></div><div class="table-wrap"><table><thead><tr><th>المدير الأصلي</th><th>البديل</th><th>الفترة</th><th>النطاق</th><th>الحالة</th><th></th></tr></thead><tbody>${state.delegations.map(d=>`<tr><td>${h(userById(d.principalId)?.name||d.principalId)}</td><td>${h(userById(d.delegateId)?.name||d.delegateId)}</td><td>${h(d.startDate)} → ${h(d.endDate)}</td><td>${d.scope==='ALL'?'كل الخدمات':h(serviceById(d.scope)?.name||d.scope)}</td><td>${(d.active!==false&&d.startDate<=today()&&d.endDate>=today())?'<span class="status done">ساري</span>':'<span class="status pending">غير ساري حاليا</span>'}</td><td>${hasPermission('delegation_manage')?`<button class="danger-link delete-delegation" data-id="${d.id}">حذف</button>`:''}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">لا توجد تفويضات</td></tr>'}</tbody></table></div></div></section>`
 }
 function workflowAdminPanel(){return `<section><div class="section-head"><div><h2>إدارة المسارات التلقائية</h2><p>هذه القوالب تحدد من يستلم المرحلة التالية. يمكن تعديل طلب منفرد لاحقا بدون تغيير القالب العام.</p></div></div><div class="workflow-admin-grid">${services.map(s=>`<article class="card"><div class="card-head"><div><span class="tag">${h(s.code)}</span><h3>${h(s.name)}</h3></div><button class="outline edit-template" data-service="${s.id}">تعديل القالب</button></div><div class="route-list small-route">${serviceTemplate(s.id).map((x,i)=>`<div><b>${i+1}</b><span><strong>${h(x.label)}</strong><small>${h(resolverText(x.resolver))} · ${h(x.mode||'SEQUENTIAL')}</small></span></div>`).join('')}</div>${state.workflowOverrides[s.id]?'<div class="override-note">تم تخصيص هذا القالب محليا</div>':''}</article>`).join('')}</div></section>`}
-function knowledgePanel(){return `<section><div class="section-head"><div><h2>مركز المعرفة</h2><p>الوثائق والمصادر المرتبطة بالخدمات.</p></div></div><div class="knowledge-grid">${knowledge.map(k=>`<article class="card knowledge"><span class="tag">${h(k.type)}</span><h3>${h(k.title)}</h3><p>${h(deptName(k.departmentId))}</p><small>${h(k.version)} · ${h(k.status)}</small></article>`).join('')}</div></section>`}
+function knowledgePanel(){return `<section><div class="section-head"><div><h2>مركز المعرفة</h2><p>الوثائق والمصادر المرتبطة بالخدمات. يدعم السجل Word وPDF وExcel عند تعريف الملف وربطه بالخدمة.</p></div></div><div class="knowledge-grid">${knowledge.map(k=>`<article class="card knowledge"><span class="tag">${h(k.type)}</span><h3>${h(k.title)}</h3><p>${h(deptName(k.departmentId))}</p><small>${h(k.version)} · ${h(k.status)}</small></article>`).join('')}</div></section>`}
 
 function openApprovalModal(reqId){
   const req=state.requests.find(r=>r.id===reqId); if(!req||!canAct(req))return; const step=currentStep(req);
@@ -507,7 +531,7 @@ function bind(){
   document.querySelectorAll('.ai-chip').forEach(x=>x.onclick=()=>submitAI(x.textContent));
   document.querySelector('#chatSend')?.addEventListener('click',()=>submitAI(document.querySelector('#chatInput').value));
   document.querySelector('#chatInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();submitAI(e.target.value)}});
-  document.querySelector('#serviceSearch')?.addEventListener('input',e=>{const q=e.target.value.toLowerCase();document.querySelector('#serviceGrid').innerHTML=services.filter(s=>s.active&&(s.name+s.code+s.procedure).toLowerCase().includes(q)).map(serviceCard).join('')||'<div class="empty">لا توجد نتائج</div>';bind()});
+  document.querySelector('#serviceSearch')?.addEventListener('input',e=>{const q=e.target.value.toLowerCase();document.querySelector('#serviceGrid').innerHTML=services.filter(s=>s.active&&serviceSearchText(s).includes(normalizeArabic(q))).map(serviceCard).join('')||'<div class="empty">لا توجد نتائج</div>';bind()});
   document.querySelector('#reviewBtn')?.addEventListener('click',collectDraft);
   document.querySelector('#backToForm')?.addEventListener('click',()=>{state.wizardStep=1;render()});
   document.querySelector('#backToForm2')?.addEventListener('click',()=>{state.wizardStep=1;render()});

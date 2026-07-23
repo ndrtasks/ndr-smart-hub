@@ -1,6 +1,6 @@
 export const users = [
-  {id:'E001', name:'نادر الجهني', email:'nader@institute.local', title:'أخصائي موارد بشرية', departmentId:'hr', managerId:'HRM01', role:'employee', permissions:[]},
-  {id:'E002', name:'أحمد', email:'ahmed@institute.local', title:'أخصائي موارد بشرية', departmentId:'hr', managerId:'HRM01', role:'specialist', permissions:['approve_hr']},
+  {id:'E001', name:'نادر الجهني', email:'nader@institute.local', title:'أخصائي موارد بشرية', departmentId:'hr', managerId:'HRM01', role:'employee', permissions:['workflow_override_hr']},
+  {id:'E002', name:'أحمد', email:'ahmed@institute.local', title:'أخصائي موارد بشرية', departmentId:'hr', managerId:'HRM01', role:'specialist', permissions:['approve_hr','workflow_override_hr']},
   {id:'HRM01', name:'مدير الموارد البشرية', email:'hr.manager@institute.local', title:'مدير الموارد البشرية', departmentId:'hr', managerId:'GM01', role:'manager', permissions:['approve_department','workflow_override_hr','view_department']},
 
   {id:'TRM01', name:'مدير التدريب - تجريبي', email:'training.manager@institute.local', title:'مدير التدريب', departmentId:'training', managerId:'GM01', role:'manager', permissions:['approve_department','view_department']},
@@ -41,8 +41,9 @@ export const services = [
   {
     id:'housing', departmentId:'hr', name:'طلب صرف بدل السكن', code:'HR-F-29', procedure:'HR-P-19', mode:'FORM_WORKFLOW', active:true,
     description:'طلب صرف بدل السكن مقدما مع نموذج مرتبط ومسار اعتماد متسلسل.',
+    aliases:['بدل سكن','صرف بدل السكن','سلفة سكن','مقدم سكن','HR-F-29'],
     form:{
-      templateName:'HR-F-29 نموذج طلب بدل السكن', revision:'7', masterPath:'assets/HR-F-29_نموذج_طلب_بدل_السكن_حسبة_الاستقالة_الدقيقة.xlsx',
+      templateName:'HR-F-29 نموذج طلب بدل السكن', revision:'7', masterPath:'assets/HR-F-29 نموذج طلب بدل سكن.xlsx',
       declaration:'أقر بصحة البيانات وأوافق على الإقرار والتعهد الوارد في النموذج وعلى معالجة الطلب وفق الصلاحيات المعتمدة.'
     },
     fields:[
@@ -71,6 +72,7 @@ export const services = [
   {
     id:'sick-leave', departmentId:'hr', name:'إجازة مرضية', code:'HR-SRV-SICK', procedure:'إجراء الإجازات', mode:'FORM_WORKFLOW', active:true,
     description:'طلب إجازة مرضية يذهب مباشرة للمختص المحدد دون المرور بالمدير المباشر حسب إعداد الخدمة.',
+    aliases:['إجازة مرضية','مرضي','تقرير طبي','مرضية','إجازة طبية'],
     form:{templateName:'طلب إجازة مرضية', revision:'تجريبي', declaration:'أقر بصحة بيانات الإجازة والمرفقات الطبية المرفوعة.'},
     fields:[
       {id:'fromDate', label:'من تاريخ', type:'date', required:true},
@@ -86,6 +88,7 @@ export const services = [
   {
     id:'short-permission', departmentId:'hr', name:'إذن قصير', code:'HR-SRV-PERM', procedure:'إجراء الأذونات', mode:'FORM_WORKFLOW', active:true,
     description:'إذن قصير يمر بالمدير المباشر أو البديل المفوض ثم الموارد البشرية.',
+    aliases:['إذن قصير','استئذان','إذن ساعات','موعد شخصي','خروج ساعتين'],
     form:{templateName:'طلب إذن قصير', revision:'تجريبي', declaration:'أقر بصحة وقت الإذن والغرض منه.'},
     fields:[
       {id:'permissionDate', label:'تاريخ الإذن', type:'date', required:true},
@@ -99,8 +102,38 @@ export const services = [
     ]
   },
   {
+    id:'attendance-memo', departmentId:'hr', name:'مذكرة الحضور', code:'HR-F-25', procedure:'إجراء الحضور والانصراف', mode:'FORM_WORKFLOW', active:true,
+    description:'طلب تعديل سجل الحضور لحالة غياب أو تأخر أو خروج مبكر أو بصمة مفقودة أو عمل عن بعد أو حالة أخرى.',
+    aliases:['مذكرة حضور','مذكرة الحضور','تعديل الحضور','تصحيح الحضور','تعديل البصمة','نسيت البصمة','لم أبصم','ما بصمت','تأخرت','تأخير','خروج مبكر','غائب','عمل عن بعد','HR-F-25'],
+    form:{
+      templateName:'HR-F-25 مذكرة الحضور', revision:'5', masterPath:'assets/HR-F-25 مذكرة الحضور.pdf', sourceFormat:'PDF',
+      declaration:'أقر بصحة بيانات الحضور والسبب الموضح وأطلب تعديل سجل الحضور وفقا للمرفقات والاعتمادات.'
+    },
+    fields:[
+      {id:'attendanceDate', label:'تاريخ الحالة', type:'date', required:true},
+      {id:'caseType', label:'نوع الحالة', type:'select', required:true, options:['غائب','خروج مبكر','متأخر','لم يبصم','العمل عن بعد','أخرى']},
+      {id:'inTime', label:'وقت الدخول الفعلي', type:'time', required:false},
+      {id:'outTime', label:'وقت الخروج الفعلي', type:'time', required:false},
+      {id:'reason', label:'السبب والتوضيح', type:'textarea', required:true, placeholder:'اشرح ما حدث وما التعديل المطلوب على سجل الحضور'}
+    ],
+    attachments:[],
+    workflowTemplate:[
+      {id:'direct-manager', label:'مراجعة واعتماد مدير القسم', resolver:{type:'DIRECT_MANAGER'}, mode:'SEQUENTIAL', stageFields:[
+        {id:'departmentAuthorization',label:'تصنيف موافقة القسم',type:'select',options:['عمل خاص بالمعهد','عمل شخصي مصرح','ملاحظة إدارية فقط']},
+        {id:'departmentRemarks',label:'ملاحظات مدير القسم',type:'textarea'}
+      ]},
+      {id:'hr-review', label:'مراجعة واعتماد الموارد البشرية', resolver:{type:'NAMED_USER', userId:'E002', fallbackRole:'specialist', departmentId:'hr'}, mode:'SEQUENTIAL', stageFields:[
+        {id:'currentMonthMemoCount',label:'عدد مذكرات الحضور في الشهر الحالي',type:'number'},
+        {id:'yearToDateMemoCount',label:'عدد المذكرات منذ بداية العام',type:'number'},
+        {id:'sameReasonMemoCount',label:'عدد المذكرات لنفس السبب',type:'number'},
+        {id:'hrRemarks',label:'ملاحظات الموارد البشرية',type:'textarea'}
+      ]}
+    ]
+  },
+  {
     id:'cert-support', departmentId:'hr', name:'دعم الدورات والشهادات المهنية', code:'HR-P-15', procedure:'HR-P-15', mode:'FORM_WORKFLOW', active:true,
     description:'تجهيز طلب دعم دورة أو شهادة مهنية ومراجعته واعتماده حسب المسار المحدد.',
+    aliases:['شهادة مهنية','دورة','دعم شهادة','SHRM','اختبار مهني'],
     form:{templateName:'طلب دعم دورة أو شهادة مهنية', revision:'تجريبي', declaration:'أقر بصحة بيانات الدورة أو الشهادة والتكلفة المرفقة.'},
     fields:[
       {id:'certificateName', label:'اسم الدورة أو الشهادة', type:'text', required:true},
@@ -118,6 +151,7 @@ export const services = [
   {
     id:'business-trip', departmentId:'hr', name:'رحلة عمل', code:'HR-F-13', procedure:'إجراء رحلة العمل', mode:'FORM_WORKFLOW', active:true,
     description:'طلب رحلة عمل مع بيانات الوجهة والفترة والغرض ومسار اعتماد متسلسل.',
+    aliases:['رحلة عمل','مهمة عمل','سفر عمل','خارج جدة','انتداب'],
     form:{templateName:'HR-F-13 رحلة عمل', revision:'تجريبي', declaration:'أقر بصحة بيانات الرحلة وأنها لغرض عمل معتمد.'},
     fields:[
       {id:'destination', label:'الوجهة', type:'text', required:true},
@@ -137,6 +171,7 @@ export const knowledge = [
   {id:'k1', type:'إجراء', title:'HR-P-19 إجراء طلب صرف بدل السكن', departmentId:'hr', version:'R6', status:'source-linked'},
   {id:'k2', type:'نموذج', title:'HR-F-29 نموذج طلب بدل السكن', departmentId:'hr', version:'R7', status:'master-linked'},
   {id:'k3', type:'إجراء', title:'HR-P-15 دعم الدورات والشهادات المهنية', departmentId:'hr', version:'بانتظار ربط المصدر النهائي', status:'demo'},
+  {id:'k4a', type:'نموذج', title:'HR-F-25 مذكرة الحضور', departmentId:'hr', version:'R5', status:'master-linked', path:'assets/HR-F-25 مذكرة الحضور.pdf', formats:['PDF','DOCX']},
   {id:'k4', type:'دليل', title:'دليل استخدام البورتال', departmentId:'hr', version:'بانتظار الربط', status:'demo'}
 ];
 
