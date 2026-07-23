@@ -1,5 +1,18 @@
 # NDR Smart Hub
 
-Internal AI-first knowledge, services and approvals hub.
+Phase 2 demo foundation.
 
-Current build is a safe static prototype using dummy data and local fallback routing. Real institutional content, authentication, workflows and AI APIs will be connected only after approved source files and environment configuration are provided.
+Current demo includes:
+- Arabic RTL AI-first home experience
+- Manual services fallback
+- Employee request creation and review
+- Dynamic service fields and workflow routes
+- Local demo attachments (file names only)
+- Approve / return / reject workflow simulation
+- Employee resubmission after return
+- Request audit timeline and progress
+- Portal-only guidance flow
+- Role-aware approvals for specialist / manager / admin
+- Admin readiness and service enable/disable controls
+
+Important: this is still a local demo. Authentication, database, secure file storage, AI provider, institutional SSO, and approved institute documents are not connected yet.
