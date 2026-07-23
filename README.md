@@ -1,18 +1,18 @@
-# NDR Smart Hub
+# NDR Smart Hub — Phase 3
 
-Phase 2 demo foundation.
+نسخة تجريبية متقدمة لمحرك الخدمات والنماذج والموافقات.
 
-Current demo includes:
-- Arabic RTL AI-first home experience
-- Manual services fallback
-- Employee request creation and review
-- Dynamic service fields and workflow routes
-- Local demo attachments (file names only)
-- Approve / return / reject workflow simulation
-- Employee resubmission after return
-- Request audit timeline and progress
-- Portal-only guidance flow
-- Role-aware approvals for specialist / manager / admin
-- Admin readiness and service enable/disable controls
+## المزايا في هذه المرحلة
+- هيكل إداري متعدد الأقسام مع مدير رئيسي لكل قسم.
+- فصل دور المدير العام عن مدير النظام.
+- تفويض/بديل مؤقت للمدير مع فترة بداية ونهاية ونطاق خدمة.
+- مسارات موافقات تلقائية قابلة للتهيئة لكل خدمة.
+- تعديل يدوي لمسار طلب محدد بواسطة أصحاب الصلاحية.
+- إشعار للمرحلة الحالية فقط، ولا يتم إشعار المراحل المستقبلية.
+- الإعادة لأي طرف سابق في المسار مع إعادة اعتماد المراحل المتأثرة.
+- إشعارات للموظف عند الإعادة أو الرفض أو الإغلاق النهائي.
+- اعتماد إلكتروني مرتبط بالحساب والتاريخ والطلب.
+- معاينة نموذج رقمية مرتبطة بنفس المعاملة وسجل الاعتمادات.
+- ربط أصل نموذج HR-F-29 كملف Master داخل assets.
 
-Important: this is still a local demo. Authentication, database, secure file storage, AI provider, institutional SSO, and approved institute documents are not connected yet.
+> ملاحظة: التخزين في هذه النسخة LocalStorage للتجربة فقط. قبل الإنتاج يجب نقل الحسابات والطلبات والمرفقات والإشعارات والسجل إلى Backend آمن مثل Firebase/Firestore أو بديل مؤسسي.
