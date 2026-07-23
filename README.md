@@ -1,31 +1,5 @@
 # NDR Smart Hub
 
-منصة معرفة وخدمات داخلية مبنية على مبدأ AI-first مع مسار يدوي كامل يعمل حتى عند تعطل الذكاء الاصطناعي.
+Internal AI-first knowledge, services and approvals hub.
 
-## الفكرة
-الموظف لا يحتاج أن يعرف اسم القسم أو رقم النموذج. يكتب حاجته بطريقته، والنظام يحدد الخدمة المناسبة ثم يربطها بالإجراء والنموذج والمرفقات وطريقة التقديم ومسار الاعتماد.
-
-## المحركات الأساسية
-- محرك المعرفة: السياسات والإجراءات والأدلة ودليل البورتال.
-- محرك الخدمات والنماذج: الخدمة ← القسم ← الإجراء ← النموذج ← المرفقات ← طريقة التقديم.
-- محرك الموظفين والصلاحيات: حساب مستقل لكل موظف وربط بياناته بالطلبات.
-- محرك الموافقات والمتابعة: اعتماد ورفض وإعادة للتعديل وسجل كامل.
-- NDR AI: واجهة ذكية للتوجيه والتنفيذ مع بديل يدوي كامل.
-
-## أنواع الخدمات
-- Portal: تنفذ في البورتال الحالي.
-- Form + Portal: تجهيز النموذج ثم توجيه المستخدم لرفعه في البورتال.
-- NDR Workflow: تجهيز الطلب واعتماده داخل المنصة.
-- Information Only: معرفة وتعليمات فقط.
-
-## النسخة الحالية
-نسخة Frontend تشغيلية أولية ببيانات تجريبية ومحرك توجيه محلي بدون أي API مدفوع. الهدف اختبار تجربة الاستخدام قبل ربط Firebase وGemini والبريد والتخزين.
-
-## القادم
-1. إدخال الإجراءات والنماذج الفعلية لكل قسم.
-2. Firebase Authentication وFirestore وPrivate Storage.
-3. Gemini Adapter مع Fallback محلي.
-4. Workflow Engine للموافقات.
-5. تعبئة Word وPDF من القوالب المعتمدة.
-6. إشعارات البريد.
-7. لوحة إدارة الوثائق والإصدارات والصلاحيات.
+Current build is a safe static prototype using dummy data and local fallback routing. Real institutional content, authentication, workflows and AI APIs will be connected only after approved source files and environment configuration are provided.

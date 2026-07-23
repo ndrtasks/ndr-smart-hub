@@ -1,192 +1,85 @@
-import { employees, departments, services, demoRequests } from './data.js';
+import { employees, departments, services, demoRequests, knowledge } from './data.js';
 
 const state = {
   user: JSON.parse(localStorage.getItem('ndr_user') || 'null'),
   panel: 'home',
   activeService: null,
-  messages: [
-    {role:'ai', text:'أهلا بك. اشرح لي ما الذي تريد إنجازه، وسأحدد لك القسم والإجراء والنموذج وطريقة التقديم المناسبة.'}
-  ]
+  messages: [{role:'ai', text:'أهلا بك. اشرح لي ما الذي تريد إنجازه، وسأحدد الخدمة والإجراء والنموذج وطريقة التقديم من المحتوى المعتمد المتاح.'}]
 };
 
 const app = document.querySelector('#app');
+const icons = {
+  home:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M9.5 20v-6h5v6"/></svg>',
+  spark:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 1.2 4.1L17 9l-3.8 1.9L12 15l-1.2-4.1L7 9l3.8-1.9L12 3Z"/><path d="m18.5 14 .7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z"/></svg>',
+  grid:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg>',
+  requests:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 4h10v16H7z"/><path d="M9.5 8h5M9.5 12h5M9.5 16h3"/></svg>',
+  book:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H12v18H7.5A3.5 3.5 0 0 0 4 23V5.5Z"/><path d="M20 5.5A3.5 3.5 0 0 0 16.5 2H12v18h4.5A3.5 3.5 0 0 1 20 23V5.5Z"/></svg>',
+  shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 5 6v5c0 5 3 8.5 7 10 4-1.5 7-5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg>',
+  search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>',
+  bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>',
+  users:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-4 2.5-6 6-6s6 2 6 6"/><path d="M16 5.5a3 3 0 0 1 0 5.5M16.5 14c2.7.4 4.5 2.3 4.5 5"/></svg>',
+  wallet:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h15a2 2 0 0 1 2 2v11H4a2 2 0 0 1-2-2V6a3 3 0 0 1 3-3h12"/><path d="M16 12h5"/></svg>',
+  graduation:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 9 9-5 9 5-9 5-9-5Z"/><path d="M7 12v4c2.8 2 7.2 2 10 0v-4"/></svg>',
+  megaphone:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 11v3h4l9 4V7l-9 4H4Z"/><path d="m17 10 4-2v9l-4-2"/><path d="m8 14 1.5 5h3"/></svg>',
+  cpu:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4"/></svg>',
+  building:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 21V5l7-3v19M12 8h7v13M2 21h20"/><path d="M8 7h1M8 11h1M8 15h1M15 11h1M15 15h1"/></svg>',
+  file:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5M9 12h6M9 16h6"/></svg>'
+};
 
-function setUser(id) {
-  state.user = employees.find(e => e.id === id);
-  localStorage.setItem('ndr_user', JSON.stringify(state.user));
-  render();
+function setUser(id){state.user=employees.find(e=>e.id===id);localStorage.setItem('ndr_user',JSON.stringify(state.user));state.panel='home';render()}
+function logout(){localStorage.removeItem('ndr_user');state.user=null;render()}
+function navigate(panel){state.panel=panel;state.activeService=null;render()}
+function selectService(id){state.activeService=services.find(s=>s.id===id);state.panel='service';render()}
+function modeLabel(mode){return {PORTAL_ONLY:'بورتال فقط',FORM_PORTAL:'نموذج + بورتال',FORM_WORKFLOW:'نموذج + اعتماد',INFO_ONLY:'معلومات فقط'}[mode]||mode}
+function deptName(id){return departments.find(d=>d.id===id)?.name||id}
+function deptIcon(id){return icons[departments.find(d=>d.id===id)?.icon]||icons.grid}
+
+function answerLocalAI(text){
+ const q=text.trim().toLowerCase(); if(!q)return null; let match=null;
+ if(q.includes('سكن'))match=services.find(s=>s.id==='housing');
+ else if(q.includes('شهادة')||q.includes('دورة')||q.includes('دورات')||q.includes('shrm'))match=services.find(s=>s.id==='cert-support');
+ else if(q.includes('رحلة')||q.includes('سفر')||q.includes('خارج جدة')||q.includes('مهمة خارج'))match=services.find(s=>s.id==='business-trip');
+ else if(q.includes('مرضي')||q.includes('مرضية')||q.includes('تقرير طبي'))match=services.find(s=>s.id==='sick-leave');
+ if(!match)return {text:'لم أجد خدمة مؤكدة من المحتوى الحالي. لن أفترض إجراء غير معتمد. يمكنك تصفح الخدمات يدويا، وبعد رفع ملفات الأقسام سأحدد الخدمة بدقة من الوثائق المعتمدة.',source:'محرك الطوارئ المحلي — لا يوجد مصدر معتمد مرتبط بهذا الطلب حاليا.'};
+ return {text:`الخدمة الأقرب لطلبك هي ${match.name}. ${match.description} سأعتمد على بيانات حسابك للحقول الثابتة وأسألك فقط عن البيانات المتغيرة عند بدء التنفيذ.`,source:match.source,service:match};
+}
+function submitAI(value){const text=value??document.querySelector('#aiInput')?.value;if(!text?.trim())return;state.messages.push({role:'user',text:text.trim()});const r=answerLocalAI(text);state.messages.push({role:'ai',text:r.text,source:r.source,service:r.service});state.panel='assistant';render()}
+
+function loginView(){
+ app.innerHTML=`<div class="login"><section class="login-visual"><div class="login-brand"><div class="mark">NDR</div><h1>مكان واحد للخدمات والمعرفة الداخلية</h1><p>منصة ذكية تفهم حاجة الموظف، تربطها بالإجراء والنموذج المناسب، وتبقي كل خدمة متاحة حتى عند تعطل الذكاء الاصطناعي.</p></div><div class="login-points"><div class="login-point"><strong>AI First</strong><span>ابدأ من حاجتك بدون معرفة اسم النموذج أو الجهة.</span></div><div class="login-point"><strong>Manual Ready</strong><span>كل الخدمات متاحة يدويا كمسار بديل دائم.</span></div><div class="login-point"><strong>Controlled</strong><span>الإجابات مرتبطة بالمصادر والصلاحيات المعتمدة.</span></div></div></section><section class="login-side"><div class="login-card"><div class="mark">NDR</div><h2>مرحبا بك</h2><p>هذه نسخة بناء تجريبية ببيانات وهمية. اختر دورا لتجربة الواجهة.</p><div class="field"><label>المستخدم التجريبي</label><select id="userSelect">${employees.map(e=>`<option value="${e.id}">${e.name} — ${e.title}</option>`).join('')}</select></div><button class="primary full" id="loginBtn">دخول إلى Smart Hub</button><div class="demo-note">في الإنتاج سيكون الدخول بحساب الموظف المؤسسي، ويحدد النظام هويته وقسمه ومديره وصلاحياته تلقائيا.</div></div></section></div>`;
+ document.querySelector('#loginBtn').onclick=()=>setUser(document.querySelector('#userSelect').value)
 }
 
-function logout() {
-  localStorage.removeItem('ndr_user');
-  state.user = null;
-  render();
+function navItem(id,label,icon){return `<button data-panel="${id}" class="${state.panel===id?'active':''}"><span class="nav-icon">${icons[icon]}</span>${label}</button>`}
+function sidebar(){const admin=state.user.role!=='employee';return `<aside class="sidebar"><div class="brand"><div class="mark">NDR</div><div><strong>Smart Hub</strong><span>Internal Knowledge & Services</span></div></div><div class="nav-label">مساحة العمل</div><div class="nav">${navItem('home','الرئيسية','home')}${navItem('assistant','NDR AI','spark')}${navItem('services','الخدمات','grid')}${navItem('requests','طلباتي','requests')}${navItem('knowledge','مركز المعرفة','book')}${admin?navItem('approvals','الموافقات','shield'):''}</div><div class="sidebar-spacer"></div><div class="user-mini"><div class="avatar">${state.user.name.slice(0,1)}</div><div><strong>${state.user.name}</strong><small>${state.user.title}</small></div></div></aside>`}
+function panelTitle(){return {assistant:'NDR AI',services:'الخدمات',requests:'طلباتي',knowledge:'مركز المعرفة',service:'تفاصيل الخدمة',approvals:'الموافقات'}[state.panel]||''}
+function topbar(){return `<div class="topbar"><div><div class="eyebrow">${state.user.department}</div><h1>${state.panel==='home'?`مرحبا ${state.user.name.split(' ')[0]}`:panelTitle()}</h1></div><div class="top-actions"><button class="icon-btn circle-btn" title="الإشعارات">${icons.bell}</button><button class="icon-btn text-logout" id="logoutBtn">تسجيل الخروج</button></div></div>`}
+
+function serviceRow(s){return `<div class="service"><div class="service-main"><div class="service-icon">${deptIcon(s.department)}</div><div><strong>${s.name}</strong><small>${modeLabel(s.mode)} · ${s.code}</small></div></div><button class="outline open-service" data-service="${s.id}">فتح</button></div>`}
+function requestRow(r){return `<div class="request"><div><strong>${r.service}</strong><div class="request-meta"><span>${r.id}</span><span>•</span><span>${r.date}</span><span>•</span><span>المرحلة: ${r.current}</span></div><div class="progress"><span style="width:${r.progress}%"></span></div></div><span class="status ${r.className}">${r.status}</span></div>`}
+
+function homePanel(){return `<section><div class="hero"><div class="ai-kicker"><div class="ai-orb">${icons.spark}</div><span>NDR AI · مدخل موحد لكل الخدمات</span></div><h2>ماذا تريد أن تنجز اليوم؟</h2><p>اكتب طلبك بطريقتك الطبيعية. النظام يحدد لك الخدمة والإجراء والنموذج وطريقة التقديم المناسبة بدون أن تحتاج لمعرفة الهيكل الإداري.</p><div class="ask-box"><textarea id="aiInput" placeholder="مثال: عندي دورة خارج جدة وأحتاج أعرف الإجراء"></textarea><button class="primary" id="askBtn">ابدأ</button></div><div class="quick-prompts">${['أريد بدل سكن','كيف أقدم إجازة مرضية؟','أريد دعم شهادة SHRM','عندي مهمة عمل خارج جدة'].map(x=>`<button class="chip prompt">${x}</button>`).join('')}</div></div><div class="dashboard-grid"><div class="card"><div class="card-head"><div><h3>معاملاتي</h3><div class="muted">نظرة سريعة على الطلبات ومسارات الاعتماد</div></div><button class="text-btn" data-panel="requests">عرض الكل</button></div><div class="stats"><div class="stat"><div class="stat-top"><strong>3</strong><div class="stat-badge">${icons.requests}</div></div><span>إجمالي الطلبات</span></div><div class="stat"><div class="stat-top"><strong>1</strong><div class="stat-badge">${icons.shield}</div></div><span>بانتظار اعتماد</span></div><div class="stat"><div class="stat-top"><strong>1</strong><div class="stat-badge">${icons.home}</div></div><span>مكتمل</span></div></div><div class="requests-card">${demoRequests.slice(0,2).map(requestRow).join('')}</div></div><div class="card"><div class="card-head"><div><h3>خدمات سريعة</h3><div class="muted">الوضع اليدوي يعمل دائما</div></div><button class="text-btn" data-panel="services">كل الخدمات</button></div><div class="service-list">${services.slice(0,4).map(serviceRow).join('')}</div></div></div></section>`}
+
+function assistantPanel(){return `<section class="chat-layout"><div class="chat"><div class="chat-head"><div class="ai-orb">${icons.spark}</div><div><strong>NDR AI</strong><div class="online">● وضع تجريبي محلي يعمل بدون API</div></div></div><div class="messages">${state.messages.map(m=>`<div class="msg ${m.role==='user'?'user':'ai'}">${m.text}${m.source?`<span class="source">المصدر: ${m.source}</span>`:''}${m.service?`<div class="actions"><button class="secondary open-service" data-service="${m.service.id}">فتح الخدمة</button></div>`:''}</div>`).join('')}</div><div class="chat-input"><input id="chatInput" placeholder="اكتب ما الذي تحتاجه..."/><button class="primary" id="chatSend">إرسال</button></div></div><div class="side-stack"><div class="card"><h3>كيف يعمل؟</h3><p class="muted">يفهم حاجتك، يحدد الخدمة، يعرض المصدر، ثم ينقلك للتنفيذ أو البورتال حسب إعداد الخدمة.</p><div class="route-mini"><div class="route-step active"><span class="route-dot"></span>فهم الطلب</div><div class="route-step"><span class="route-dot"></span>مطابقة الخدمة</div><div class="route-step"><span class="route-dot"></span>التحقق من المصدر</div><div class="route-step"><span class="route-dot"></span>التنفيذ والمتابعة</div></div></div><div class="notice">هذه النسخة لا تقدم معلومات تنظيمية نهائية. أي محتوى تجريبي سيتم استبداله بالنصوص والملفات المعتمدة التي ترفعها لاحقا.</div><div class="card"><h3>تعطل الذكاء؟</h3><p class="muted">لا تتوقف المنصة. افتح الخدمات يدويا وأكمل نفس العملية بدون AI.</p><button class="outline" data-panel="services">تصفح الخدمات</button></div></div></section>`}
+
+function servicesPanel(){const counts=Object.fromEntries(departments.map(d=>[d.id,services.filter(s=>s.department===d.id).length]));return `<section><div class="section-title"><div><h2>الخدمات</h2><div class="eyebrow">ابدأ من القسم أو ابحث باسم الخدمة أو النموذج أو الإجراء</div></div><div class="search-wrap">${icons.search}<input class="search" id="serviceSearch" placeholder="ابحث عن خدمة أو نموذج أو إجراء"/></div></div><div class="department-grid">${departments.map(d=>`<article class="department"><div class="dept-icon">${icons[d.icon]}</div><strong>${d.name}</strong><span>${d.description}</span><small>${counts[d.id]?`${counts[d.id]} خدمات مضافة تجريبيا`:'بانتظار ملفات القسم'}</small></article>`).join('')}</div><div class="card services-block"><div class="card-head"><div><h3>الخدمات المضافة حاليا</h3><div class="muted">عينات لبناء المحرك وليست بديلا عن الملفات المعتمدة</div></div></div><div class="service-list" id="allServices">${services.map(serviceRow).join('')}</div></div></section>`}
+
+function servicePanel(){const s=state.activeService;if(!s)return servicesPanel();return `<section class="service-detail"><div class="service-hero"><div class="tag-row"><span class="tag">${deptName(s.department)}</span><span class="tag">${modeLabel(s.mode)}</span><span class="tag demo">محتوى تجريبي</span></div><h2>${s.name}</h2><p class="muted">${s.description}</p><div class="actions"><button class="primary">ابدأ الإجراء</button><button class="outline">عرض المرجع</button>${s.mode.includes('PORTAL')?'<button class="outline">دليل البورتال</button>':''}</div></div><div class="detail-grid"><div class="card"><div class="card-head"><div><h3>رحلة الخدمة</h3><div class="muted">المسار الظاهر للموظف من البداية حتى الإغلاق</div></div></div><div class="steps">${s.steps.map((x,i)=>`<div class="step"><span class="step-num">${i+1}</span><span>${x}</span></div>`).join('')}</div></div><div class="side-stack"><div class="card"><h3>المرجع</h3><div class="list-clean"><div class="list-item"><span class="check">✓</span><span>الإجراء: ${s.procedure}</span></div><div class="list-item"><span class="check">✓</span><span>النموذج: ${s.code}</span></div><div class="list-item"><span class="check">!</span><span>${s.source}</span></div></div></div><div class="card"><h3>المرفقات</h3><div class="list-clean">${s.attachments.length?s.attachments.map(x=>`<div class="list-item"><span class="check">+</span><span>${x}</span></div>`).join(''):'<div class="muted">لا توجد مرفقات معرفة حاليا</div>'}</div></div></div></div></section>`}
+function requestsPanel(){return `<section><div class="section-title"><div><h2>طلباتي</h2><div class="eyebrow">كل معاملة مع مرحلتها الحالية ومسارها</div></div></div><div class="card">${demoRequests.map(requestRow).join('')}</div></section>`}
+function knowledgePanel(){return `<section><div class="section-title"><div><h2>مركز المعرفة</h2><div class="eyebrow">سياسات وإجراءات وأدلة ونماذج — مع إدارة الإصدار والصلاحية</div></div><div class="search-wrap">${icons.search}<input class="search" id="knowledgeSearch" placeholder="ابحث في الوثائق"/></div></div><div class="knowledge-grid" id="knowledgeGrid">${knowledge.map(k=>knowledgeCard(k)).join('')}</div></section>`}
+function knowledgeCard(k){return `<article class="knowledge-card"><div class="doc-icon">${icons.file}</div><strong>${k.title}</strong><div class="knowledge-meta"><span class="tag">${k.type}</span><span class="tag">${k.department}</span><span class="tag demo">تجريبي</span></div><p class="muted">${k.version}</p></article>`}
+function approvalsPanel(){return `<section><div class="section-title"><div><h2>الموافقات</h2><div class="eyebrow">مساحة المدير والمختص لمراجعة الطلبات حسب الصلاحية</div></div></div><div class="card"><div class="card-head"><div><h3>طلبات بانتظار الإجراء</h3><div class="muted">بيانات تجريبية لعرض شكل المسار فقط</div></div></div>${demoRequests.filter(r=>r.className==='pending').map(requestRow).join('')||'<div class="empty">لا توجد طلبات</div>'}</div></section>`}
+
+function bindEvents(){
+ document.querySelectorAll('[data-panel]').forEach(b=>b.onclick=()=>navigate(b.dataset.panel));
+ document.querySelectorAll('.open-service').forEach(b=>b.onclick=()=>selectService(b.dataset.service));
+ document.querySelector('#logoutBtn')?.addEventListener('click',logout);
+ document.querySelector('#askBtn')?.addEventListener('click',()=>submitAI());
+ document.querySelectorAll('.prompt').forEach(b=>b.onclick=()=>submitAI(b.textContent));
+ document.querySelector('#chatSend')?.addEventListener('click',()=>submitAI(document.querySelector('#chatInput').value));
+ document.querySelector('#chatInput')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();submitAI(e.target.value)}});
+ document.querySelector('#serviceSearch')?.addEventListener('input',e=>{const q=e.target.value.toLowerCase();const found=services.filter(s=>(s.name+s.code+s.procedure+deptName(s.department)).toLowerCase().includes(q));document.querySelector('#allServices').innerHTML=found.length?found.map(serviceRow).join(''):'<div class="empty">لا توجد نتائج مطابقة</div>';document.querySelectorAll('.open-service').forEach(b=>b.onclick=()=>selectService(b.dataset.service))});
+ document.querySelector('#knowledgeSearch')?.addEventListener('input',e=>{const q=e.target.value.toLowerCase();const found=knowledge.filter(k=>(k.title+k.type+k.department).toLowerCase().includes(q));document.querySelector('#knowledgeGrid').innerHTML=found.length?found.map(knowledgeCard).join(''):'<div class="empty">لا توجد نتائج مطابقة</div>'});
 }
-
-function navigate(panel) {
-  state.panel = panel;
-  state.activeService = null;
-  render();
-}
-
-function selectService(id) {
-  state.activeService = services.find(s => s.id === id);
-  state.panel = 'service';
-  render();
-}
-
-function serviceModeLabel(mode) {
-  return {
-    PORTAL_ONLY:'بورتال', FORM_PORTAL:'نموذج + بورتال', FORM_WORKFLOW:'نموذج + اعتماد داخل النظام', INFO_ONLY:'معلومات فقط'
-  }[mode] || mode;
-}
-
-function answerLocalAI(text) {
-  const q = text.trim().toLowerCase();
-  if (!q) return null;
-  let match = null;
-  if (q.includes('سكن')) match = services.find(s=>s.id==='housing');
-  else if (q.includes('شهادة') || q.includes('دورة') || q.includes('دورات')) match = services.find(s=>s.id==='cert-support');
-  else if (q.includes('رحلة') || q.includes('سفر') || q.includes('مهمة خارج')) match = services.find(s=>s.id==='business-trip');
-  else if (q.includes('مرضي') || q.includes('مرضية') || q.includes('اجازة') || q.includes('إجازة')) match = services.find(s=>s.id==='sick-leave');
-
-  if (!match) {
-    return {
-      text:'لم أجد خدمة مؤكدة من المحتوى المعتمد الحالي. استخدم تصفح الخدمات يدويا، أو بعد رفع إجراءات الأقسام سأتمكن من تحديد الجهة والخدمة بدقة بدون افتراض.',
-      source:'محرك الطوارئ المحلي — لا توجد وثيقة معتمدة مرتبطة بهذا السؤال حاليا.'
-    };
-  }
-
-  const portal = match.mode.includes('PORTAL')
-    ? ' وبعد تجهيز المطلوب سأوجهك إلى خطوات التقديم في البورتال.'
-    : ' ويمكن تنفيذ الخطوات ومتابعة الاعتماد من داخل النظام.';
-  return {
-    text:`الخدمة الأقرب لطلبك هي: ${match.name}. ${match.description}${portal}`,
-    source:match.source,
-    service:match
-  };
-}
-
-function submitAI(value) {
-  const text = value ?? document.querySelector('#aiInput')?.value;
-  if (!text?.trim()) return;
-  state.messages.push({role:'user', text:text.trim()});
-  const result = answerLocalAI(text);
-  state.messages.push({role:'ai', text:result.text, source:result.source, service:result.service});
-  state.panel = 'assistant';
-  render();
-}
-
-function loginView() {
-  app.innerHTML = `
-    <div class="login">
-      <div class="login-card">
-        <div class="logo">NDR</div>
-        <h1>مركز الخدمات والمعرفة الذكي</h1>
-        <p>نسخة البناء الأولى — دخول تجريبي ببيانات وهمية وآمنة.</p>
-        <div class="field">
-          <label>اختر مستخدم تجريبي</label>
-          <select id="userSelect">
-            ${employees.map(e=>`<option value="${e.id}">${e.name} — ${e.title}</option>`).join('')}
-          </select>
-        </div>
-        <button class="primary" id="loginBtn">دخول</button>
-        <div class="demo-note">في النسخة الفعلية سيكون لكل موظف حساب مستقل مرتبط بسجله وصلاحياته. لن يعتمد النظام على كتابة الاسم أو الرقم الوظيفي يدويا.</div>
-      </div>
-    </div>`;
-  document.querySelector('#loginBtn').onclick = ()=>setUser(document.querySelector('#userSelect').value);
-}
-
-function sidebar() {
-  const links = [
-    ['home','الرئيسية'],['assistant','NDR AI'],['services','الخدمات'],['requests','طلباتي'],['knowledge','مركز المعرفة']
-  ];
-  return `
-    <aside class="sidebar">
-      <div class="brand"><div class="logo">NDR</div><div><strong>Smart Hub</strong><span>Knowledge & Services</span></div></div>
-      <div class="nav">
-        ${links.map(([id,label])=>`<button data-panel="${id}" class="${state.panel===id?'active':''}">${label}</button>`).join('')}
-      </div>
-      <div class="sidebar-footer"><div class="user-mini"><div class="avatar">${state.user.name.slice(0,1)}</div><div><strong>${state.user.name}</strong><small>${state.user.title}</small></div></div></div>
-    </aside>`;
-}
-
-function topbar() {
-  return `<div class="topbar"><div><div class="eyebrow">${state.user.department}</div><h1>${state.panel==='home'?'مرحبا '+state.user.name.split(' ')[0]:panelTitle()}</h1></div><div class="top-actions"><button class="icon-btn" id="logoutBtn">تسجيل الخروج</button></div></div>`;
-}
-function panelTitle(){ return {assistant:'NDR AI',services:'الخدمات',requests:'طلباتي',knowledge:'مركز المعرفة',service:'تفاصيل الخدمة'}[state.panel]||''; }
-
-function homePanel() {
-  return `<section class="panel active">
-    <div class="hero">
-      <div class="ai-title"><div class="ai-badge">NDR AI</div><span class="eyebrow">ابدأ من حاجتك وليس من اسم النموذج</span></div>
-      <h2>ماذا تريد أن تنجز اليوم؟</h2>
-      <p>اكتب طلبك بطريقتك. سأحدد لك الجهة والخدمة والإجراء والنموذج وطريقة التقديم.</p>
-      <div class="ask-box"><textarea id="aiInput" placeholder="مثال: أريد التقديم على دعم شهادة مهنية"></textarea><button class="primary" id="askBtn">ابدأ</button></div>
-      <div class="quick-prompts">
-        ${['أريد بدل سكن','كيف أقدم إجازة مرضية؟','أريد دعم شهادة مهنية','عندي رحلة عمل'].map(x=>`<button class="chip prompt">${x}</button>`).join('')}
-      </div>
-    </div>
-    <div class="grid">
-      <div class="card span-8"><h3>متابعة معاملاتي</h3><div class="muted">حالة الطلبات ومسارات الاعتماد</div>
-        <div class="stat-row"><div class="stat"><strong>3</strong><span>إجمالي الطلبات</span></div><div class="stat"><strong>1</strong><span>بانتظار اعتماد</span></div><div class="stat"><strong>1</strong><span>مكتمل</span></div></div>
-      </div>
-      <div class="card span-4"><h3>خدمات سريعة</h3><div class="muted">يمكنك التنفيذ يدويا بدون الذكاء</div><div class="service-list">${services.slice(0,3).map(serviceRow).join('')}</div></div>
-      <div class="card span-12"><h3>آخر معاملاتي</h3>${demoRequests.map(requestRow).join('')}</div>
-    </div>
-  </section>`;
-}
-
-function assistantPanel() {
-  return `<section class="panel active"><div class="chat-wrap">
-    <div class="chat"><div class="messages">${state.messages.map(m=>`<div class="msg ${m.role==='user'?'user':'ai'}">${m.text}${m.source?`<span class="source">المصدر: ${m.source}</span>`:''}${m.service?`<div class="actions" style="margin-top:10px"><button class="secondary open-service" data-service="${m.service.id}">فتح الخدمة</button></div>`:''}</div>`).join('')}</div>
-    <div class="chat-input"><input id="chatInput" placeholder="اكتب ما الذي تحتاجه..."><button class="primary" id="chatSend">إرسال</button></div></div>
-    <div class="card"><h3>الوضع اليدوي متاح دائما</h3><p class="muted">إذا تعطل مزود الذكاء أو انتهى الحد المجاني، تظل الخدمات والنماذج والإجراءات والموافقات تعمل.</p><button class="outline" data-panel="services">تصفح الخدمات</button></div>
-  </div></section>`;
-}
-
-function servicesPanel() {
-  return `<section class="panel active"><div class="section-title"><div><h2>الخدمات</h2><div class="eyebrow">تصفح يدوي حسب الحاجة أو القسم</div></div><input class="search" id="serviceSearch" placeholder="ابحث عن خدمة أو نموذج أو إجراء"></div>
-  <div class="department-grid">${departments.map(d=>`<div class="department"><strong>${d.name}</strong><span>${d.count ? d.count+' خدمات مضافة حاليا' : 'سيتم إضافة المحتوى بعد استلام ملفات القسم'}</span></div>`).join('')}</div>
-  <div class="card" style="margin-top:18px"><h3>الخدمات المضافة حاليا</h3><div class="service-list" id="allServices">${services.map(serviceRow).join('')}</div></div></section>`;
-}
-
-function servicePanel() {
-  const s=state.activeService;
-  if(!s) return servicesPanel();
-  return `<section class="panel active"><div class="service-detail">
-    <div class="card"><div class="eyebrow">${departments.find(d=>d.id===s.department)?.name} · ${serviceModeLabel(s.mode)}</div><h2>${s.name}</h2><p class="muted">${s.description}</p><div class="actions"><button class="secondary">ابدأ الإجراء</button><button class="outline">عرض الإجراء</button>${s.mode.includes('PORTAL')?'<button class="outline">دليل البورتال</button>':''}</div></div>
-    <div class="grid" style="margin-top:0"><div class="card span-8"><h3>رحلة الخدمة</h3><div class="steps">${s.steps.map(x=>`<div class="step">${x}</div>`).join('')}</div></div>
-    <div class="card span-4"><h3>المرجع</h3><p class="muted">الإجراء: ${s.procedure}</p><p class="muted">النموذج: ${s.code}</p><p class="muted">${s.source}</p><h3 style="margin-top:20px">المرفقات</h3><p class="muted">${s.attachments.length?s.attachments.join(' · '):'لا توجد مرفقات معرفة حاليا'}</p></div></div>
-  </div></section>`;
-}
-
-function requestsPanel(){ return `<section class="panel active"><div class="card"><h2>طلباتي</h2><div class="eyebrow">المعاملات التي أنشأتها وحالتها الحالية</div>${demoRequests.map(requestRow).join('')}</div></section>`; }
-function knowledgePanel(){ return `<section class="panel active"><div class="section-title"><div><h2>مركز المعرفة</h2><div class="eyebrow">سياسات وإجراءات وأدلة ونماذج معتمدة ومحدثة</div></div><input class="search" placeholder="ابحث في الوثائق"></div><div class="grid"><div class="card span-4"><h3>الإجراءات</h3><p class="muted">تظهر النسخة الحالية فقط للموظف وتبقى الإصدارات السابقة للأرشفة الإدارية.</p></div><div class="card span-4"><h3>النماذج</h3><p class="muted">Word وPDF التفاعلي مع ربط كل نموذج بالخدمة والإجراء.</p></div><div class="card span-4"><h3>أدلة الأنظمة</h3><p class="muted">دليل البورتال وغيره، بحيث يكمل شرح الإجراء حتى آخر خطوة في التقديم.</p></div></div></section>`; }
-
-function serviceRow(s){ return `<div class="service"><div class="service-main"><div class="service-icon">${s.department.toUpperCase()}</div><div><strong>${s.name}</strong><small>${serviceModeLabel(s.mode)}</small></div></div><button class="outline open-service" data-service="${s.id}">فتح</button></div>`; }
-function requestRow(r){ return `<div class="request"><div><strong>${r.service}</strong><div class="eyebrow">${r.id} · ${r.date}</div></div><span class="status ${r.className}">${r.status}</span></div>`; }
-
-function bindEvents() {
-  document.querySelectorAll('[data-panel]').forEach(b=>b.onclick=()=>navigate(b.dataset.panel));
-  document.querySelectorAll('.open-service').forEach(b=>b.onclick=()=>selectService(b.dataset.service));
-  document.querySelector('#logoutBtn')?.addEventListener('click', logout);
-  document.querySelector('#askBtn')?.addEventListener('click', ()=>submitAI());
-  document.querySelectorAll('.prompt').forEach(b=>b.onclick=()=>submitAI(b.textContent));
-  document.querySelector('#chatSend')?.addEventListener('click', ()=>submitAI(document.querySelector('#chatInput').value));
-  document.querySelector('#chatInput')?.addEventListener('keydown', e=>{if(e.key==='Enter')submitAI(e.target.value)});
-  document.querySelector('#serviceSearch')?.addEventListener('input', e=>{
-    const q=e.target.value.toLowerCase();
-    document.querySelector('#allServices').innerHTML=services.filter(s=>(s.name+s.code+s.procedure).toLowerCase().includes(q)).map(serviceRow).join('') || '<p class="muted">لا توجد نتائج</p>';
-    document.querySelectorAll('.open-service').forEach(b=>b.onclick=()=>selectService(b.dataset.service));
-  });
-}
-
-function render() {
-  if (!state.user) return loginView();
-  const panel = state.panel==='home'?homePanel():state.panel==='assistant'?assistantPanel():state.panel==='services'?servicesPanel():state.panel==='requests'?requestsPanel():state.panel==='knowledge'?knowledgePanel():servicePanel();
-  app.innerHTML = `<div class="shell">${sidebar()}<main class="main">${topbar()}${panel}</main></div>`;
-  bindEvents();
-}
-
+function render(){if(!state.user)return loginView();const panels={home:homePanel,assistant:assistantPanel,services:servicesPanel,requests:requestsPanel,knowledge:knowledgePanel,service:servicePanel,approvals:approvalsPanel};const fn=panels[state.panel]||homePanel;app.innerHTML=`<div class="shell">${sidebar()}<main class="main">${topbar()}${fn()}</main></div>`;bindEvents()}
 render();
