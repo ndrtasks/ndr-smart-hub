@@ -340,12 +340,24 @@ function serviceDurationText(months){if(months===null)return tr('غير متوف
 function housingEligibilityText(user=state.user){const e=housingEligibility(user);if(e.reason==='MISSING_DATE')return tr('لا يوجد تاريخ تعيين في ملف الموظف. يجب تحديث الملف قبل احتساب الاستحقاق.','Joining date is missing from the employee profile. Update the profile before calculating eligibility.');if(!e.eligible)return tr(`مدة خدمتك المحتسبة ${serviceDurationText(e.serviceMonths)}. يبدأ الاستحقاق في هذا النموذج من 3 سنوات ونصف، لذلك لا توجد مدة متاحة حاليا.`,`Your calculated service is ${serviceDurationText(e.serviceMonths)}. Eligibility for this form starts at 3.5 years, so no advance period is currently available.`);const opts=e.options.map(x=>isEn()?`${x} months`:`${x} أشهر`).join(tr(' أو ',' or '));return tr(`مدة خدمتك المحتسبة ${serviceDurationText(e.serviceMonths)}. الخيارات المتاحة حسب شريحة الاستحقاق الحالية: ${opts}.`,`Your calculated service is ${serviceDurationText(e.serviceMonths)}. Available options under your current eligibility tier: ${opts}.`)}
 function dynamicOptions(f,service,owner=state.user){if(f.dynamicOptions==='HOUSING_ELIGIBILITY')return housingEligibility(owner).options.map(String);return f.options||[]}
 function calculatedHousingTotal(data={},owner=state.user){const months=Number(data.requestedMonths||0),allowance=Number(owner?.housingAllowance||0);return months>0&&allowance>0?months*allowance:0}
+function requestedHousingAmount(data={}){const amount=Number(data.requestedAmount||0);return Number.isFinite(amount)&&amount>0?amount:0}
+function housingAmountStatus(data={},owner=state.user){
+  const ceiling=calculatedHousingTotal(data,owner),requested=requestedHousingAmount(data);
+  if(!data.requestedMonths)return {valid:false,reason:'NO_CEILING',ceiling,requested};
+  if(!requested)return {valid:false,reason:'NO_AMOUNT',ceiling,requested};
+  if(requested>ceiling)return {valid:false,reason:'OVER_LIMIT',ceiling,requested,overBy:requested-ceiling};
+  return {valid:true,reason:'OK',ceiling,requested,remaining:ceiling-requested};
+}
+function housingEstimatedInstallment(data={}){const amount=requestedHousingAmount(data),months=Number(data.repaymentMonths||0);return amount>0&&months>0?amount/months:0}
+function formatMoney(value){const n=Number(value||0);return new Intl.NumberFormat(isEn()?'en-US':'ar-SA',{minimumFractionDigits:Number.isInteger(n)?0:2,maximumFractionDigits:2}).format(n)}
 
 function fieldControl(f,value='',data={},service=serviceById(state.activeServiceId),owner=state.user){
   const v=h(value),req=fieldRequired(f,data)?'required':'';
   if(f.type==='select'){const opts=dynamicOptions(f,service,owner);return `<select name="${f.id}" ${req}><option value="">${tr('اختر','Select')}</option>${opts.map(o=>`<option value="${h(o)}" ${String(o)===String(value)?'selected':''}>${h(optionLabel(f,String(o)))}</option>`).join('')}</select>`;}
   if(f.type==='textarea')return `<textarea name="${f.id}" ${req} placeholder="${h(fieldPlaceholder(f))}">${v}</textarea>`;
-  return `<div class="input-wrap"><input type="${f.type}" name="${f.id}" value="${v}" ${req} placeholder="${h(fieldPlaceholder(f))}"/>${(isEn()?f.suffixEn:f.suffix)?`<span>${h(isEn()?f.suffixEn:f.suffix)}</span>`:''}</div>`;
+  const attrs=[f.min!==undefined?`min="${h(f.min)}"`:'',f.max!==undefined?`max="${h(f.max)}"`:'',f.step!==undefined?`step="${h(f.step)}"`:''];
+  if(service?.id==='housing'&&f.id==='requestedAmount'){const max=calculatedHousingTotal(data,owner);if(max>0)attrs.push(`max="${h(max)}"`);}
+  return `<div class="input-wrap"><input type="${f.type}" name="${f.id}" value="${v}" ${req} ${attrs.filter(Boolean).join(' ')} placeholder="${h(fieldPlaceholder(f))}"/>${(isEn()?f.suffixEn:f.suffix)?`<span>${h(isEn()?f.suffixEn:f.suffix)}</span>`:''}</div>`;
 }
 function syncDraftFromForm(){
   const service=serviceById(state.activeServiceId);const form=document.querySelector('#requestForm');if(!service||!form)return;
@@ -369,8 +381,14 @@ function collectDraft(){
     attachments[a.id]=name;
     if(attachmentRequired(a,data)&&!name){el?.classList.add('invalid');ok=false}else el?.classList.remove('invalid');
   });
+  if(service.id==='housing'){
+    const allowed=housingEligibility(state.user).options.map(Number),selected=Number(data.requestedMonths||0),amountState=housingAmountStatus(data,state.user);
+    if(!allowed.includes(selected)){form.elements.requestedMonths?.classList.add('invalid');toast(tr('اختر سقف استحقاق متاح حسب مدة خدمتك.','Choose an eligibility ceiling available for your service duration.'),'error');return}
+    if(amountState.reason==='NO_AMOUNT'){form.elements.requestedAmount?.classList.add('invalid');toast(tr('أدخل المبلغ الذي ترغب في طلبه.','Enter the amount you want to request.'),'error');return}
+    if(amountState.reason==='OVER_LIMIT'){form.elements.requestedAmount?.classList.add('invalid');toast(tr(`المبلغ المطلوب يتجاوز الحد الأعلى بمقدار ${formatMoney(amountState.overBy)} ريال.`,`Requested amount exceeds the maximum by ${formatMoney(amountState.overBy)} SAR.`),'error');return}
+  }
   if(!ok){toast(tr('أكمل فقط البيانات المطلوبة لهذه الحالة','Complete only the fields required for this case'),'error');return}
-  data.attachments=attachments;if(service.id==='housing'){data.joiningDate=state.user.joiningDate||'';data.serviceMonths=housingEligibility(state.user).serviceMonths;data.monthlyHousingAllowance=Number(state.user.housingAllowance||0);data.totalAmount=calculatedHousingTotal(data,state.user);}state.draft=data;state.wizardStep=2;render();
+  data.attachments=attachments;if(service.id==='housing'){const amountState=housingAmountStatus(data,state.user);data.joiningDate=state.user.joiningDate||'';data.serviceMonths=housingEligibility(state.user).serviceMonths;data.monthlyHousingAllowance=Number(state.user.housingAllowance||0);data.maxEligibleAmount=amountState.ceiling;data.totalAmount=amountState.requested;data.estimatedInstallment=housingEstimatedInstallment(data);}state.draft=data;state.wizardStep=2;render();
 }
 
 function editReturned(id){
@@ -529,7 +547,7 @@ function formPreview(service, reqData, req=null){
   const data=reqData||{};const owner=req?userById(req.ownerId):state.user;const signatures=req?.requesterSignatures||[];const latestRequester=[...signatures].reverse().find(s=>s.valid);const route=req?.route||instantiateRoute(service,owner);const fields=visibleFields(service,data);
   const fieldRows=fields.map(f=>`<div class="doc-field"><span>${h(fieldLabel(f))}</span><strong>${h(displayFieldValue(f,data?.[f.id]))}${(isEn()?f.suffixEn:f.suffix)&&data?.[f.id]?` ${h(isEn()?f.suffixEn:f.suffix)}`:''}</strong></div>`).join('');
   const approvals=route.map((s,i)=>{const a=[...(s.approvals||[])].reverse().find(x=>x.valid);return `<div class="approval-box"><span>${i+1}. ${h(stepLabel(s))}</span>${a?`<strong>${tr('تم الاعتماد إلكترونيا','Electronically Approved')}</strong><small>${h(userName(userById(a.userId))||a.signature.name)} - ${h(userTitle(userById(a.userId))||a.signature.title)}</small><small>${fmt(a.signature.at)}</small>${a.note?`<em>${tr('ملاحظة','Note')}: ${h(a.note)}</em>`:''}`:`<strong class="muted">${tr('بانتظار وصول الدور','Waiting for this stage')}</strong><small>${h(assigneeDisplay(s)||tr('سيحدد حسب المسار','Assigned by workflow'))}</small>`}</div>`}).join('');
-  const housingExtra=service.id==='housing'?`<div class="doc-section"><h4>${tr('الاستحقاق المحتسب','Calculated Eligibility')}</h4><div class="doc-grid"><div class="doc-field"><span>${tr('تاريخ التعيين','Joining Date')}</span><strong>${h(owner?.joiningDate||tr('غير متوفر','Not available'))}</strong></div><div class="doc-field"><span>${tr('مدة الخدمة','Service Duration')}</span><strong>${h(serviceDurationText(completeServiceMonths(owner?.joiningDate)))}</strong></div><div class="doc-field"><span>${tr('بدل السكن الشهري','Monthly Housing Allowance')}</span><strong>${h(owner?.housingAllowance||0)} ${tr('ريال','SAR')}</strong></div><div class="doc-field"><span>${tr('الإجمالي المتوقع','Expected Total')}</span><strong>${h(data.totalAmount||calculatedHousingTotal(data,owner)||0)} ${tr('ريال','SAR')}</strong></div></div><p class="eligibility-note">${h(housingEligibilityText(owner))}</p></div>`:'';
+  const housingExtra=service.id==='housing'?(()=>{const amountState=housingAmountStatus(data,owner),installment=data.estimatedInstallment||housingEstimatedInstallment(data);return `<div class="doc-section"><h4>${tr('الاستحقاق والمبلغ المطلوب','Eligibility & Requested Amount')}</h4><div class="doc-grid"><div class="doc-field"><span>${tr('تاريخ التعيين','Joining Date')}</span><strong>${h(owner?.joiningDate||tr('غير متوفر','Not available'))}</strong></div><div class="doc-field"><span>${tr('مدة الخدمة','Service Duration')}</span><strong>${h(serviceDurationText(completeServiceMonths(owner?.joiningDate)))}</strong></div><div class="doc-field"><span>${tr('بدل السكن الشهري','Monthly Housing Allowance')}</span><strong>${h(formatMoney(owner?.housingAllowance||0))} ${tr('ريال','SAR')}</strong></div><div class="doc-field"><span>${tr('الحد الأعلى حسب السقف المختار','Maximum under selected ceiling')}</span><strong>${h(formatMoney(data.maxEligibleAmount||amountState.ceiling||0))} ${tr('ريال','SAR')}</strong></div><div class="doc-field"><span>${tr('المبلغ المطلوب فعليا','Actual Requested Amount')}</span><strong>${h(formatMoney(data.totalAmount||amountState.requested||0))} ${tr('ريال','SAR')}</strong></div><div class="doc-field"><span>${tr('القسط التقديري','Estimated Installment')}</span><strong>${h(formatMoney(installment||0))} ${tr('ريال','SAR')}</strong></div></div><p class="eligibility-note">${h(housingEligibilityText(owner))}</p></div>`})():'';
   return `<div class="document-preview"><div class="doc-top"><div><strong>${h(localized(service.form,'templateName',service.code))}</strong><small>${tr('معاينة منظمة للبيانات التي ستكتب في النموذج المعتمد','Structured preview of the data that will be written to the approved form')}</small></div><div class="doc-ref"><span>${h(service.code)}</span><span>Revision ${h(service.form.revision||tr('غير محدد','Not specified'))}</span></div></div><div class="doc-section"><h4>${tr('بيانات الموظف','Employee Information')}</h4><div class="doc-grid"><div class="doc-field"><span>${tr('الاسم','Name')}</span><strong>${h(userName(owner))}</strong></div><div class="doc-field"><span>${tr('الرقم الوظيفي','Employee ID')}</span><strong>${h(owner?.id||tr('غير معروف','Unknown'))}</strong></div><div class="doc-field"><span>${tr('القسم','Department')}</span><strong>${h(deptName(owner?.departmentId))}</strong></div><div class="doc-field"><span>${tr('المسمى','Title')}</span><strong>${h(userTitle(owner))}</strong></div></div></div>${housingExtra}<div class="doc-section"><h4>${service.id==='attendance-memo'?tr('تفاصيل حالة الحضور','Attendance Case Details'):tr('بيانات الطلب','Request Details')}</h4><div class="doc-grid">${fieldRows||`<div class="doc-field"><span>${tr('البيانات','Data')}</span><strong>${tr('بانتظار الإدخال','Waiting for input')}</strong></div>`}</div></div>${previewAttachmentRows(service,data)}<div class="doc-section declaration"><h4>${tr('الإقرار','Declaration')}</h4><p>${h(localized(service.form,'declaration',tr('أقر بصحة البيانات الواردة في الطلب.','I confirm the accuracy of the request information.')))}</p>${latestRequester?`<div class="e-sign"><strong>${tr('اعتماد الموظف إلكترونيا','Employee Electronic Approval')}</strong><span>${h(userName(owner))} - ${h(userTitle(owner))}</span><span>${fmt(latestRequester.at)} · ${h(req?.id||tr('مسودة','Draft'))}</span></div>`:`<div class="e-sign pending-sign">${tr('سيتم تسجيل اسم الموظف والحساب والتاريخ عند الإرسال','The employee name, account and date will be recorded on submission')}</div>`}</div>${service.id==='housing'?housingControlledSection(req):''}<div class="doc-section"><h4>${tr('سجل الاعتمادات','Approval Record')}</h4><div class="approval-grid">${approvals}</div></div>${service.form.masterPath?`<div class="doc-master">${tr('الملف المعتمد محفوظ كـ Master ولا يتم تعديل الأصل.','The approved Master file remains unchanged.')} <a href="${encodeURI(service.form.masterPath)}" target="_blank">${tr('فتح الملف المعتمد','Open approved file')}</a></div>`:''}</div>`;
 }
 function loginView(){
@@ -554,11 +572,13 @@ function servicePanel(){
   const s=serviceById(state.activeServiceId);if(!s)return servicesPanel();const route=serviceTemplate(s.id);const housing=s.id==='housing'?`<div class="eligibility-card ${housingEligibility(state.user).eligible?'ok':'blocked'}"><strong>${tr('استحقاقك الحالي','Your Current Eligibility')}</strong><p>${h(housingEligibilityText(state.user))}</p></div>`:'';return `<section><div class="service-hero card"><div><span class="tag">${h(deptName(s.departmentId))}</span><h2>${h(serviceName(s))}</h2><p>${h(serviceDescription(s))}</p>${housing}<div class="actions"><button class="primary start-service" data-service="${s.id}" ${s.id==='housing'&&!housingEligibility(state.user).eligible?'disabled':''}>${tr('إنشاء طلب','Create Request')}</button>${s.form.masterPath?`<a class="outline link-btn" href="${encodeURI(s.form.masterPath)}" target="_blank">${tr('فتح النموذج الأصلي','Open Original Form')}</a>`:''}</div></div><div class="service-meta"><div><span>${tr('النموذج','Form')}</span><strong>${h(s.code)}</strong></div><div><span>${tr('الإجراء','Procedure')}</span><strong>${h(s.procedure)}</strong></div><div><span>${tr('المسار','Workflow')}</span><strong>${route.length} ${tr('مراحل','stages')}</strong></div><div><span>${tr('صيغة النموذج','Form Format')}</span><strong>${h(s.form.sourceFormat||tr('رقمي','Digital'))}</strong></div></div></div><div class="detail-grid"><div class="card"><h3>${tr('المسار التلقائي الحالي','Current Automatic Workflow')}</h3><div class="route-list">${route.map((x,i)=>`<div><b>${i+1}</b><span><strong>${h(stepLabel(x))}</strong><small>${h(resolverText(x.resolver))}</small></span></div>`).join('')}</div></div><div class="card"><h3>${tr('بيانات يطلبها النظام','Information Requested by the System')}</h3><div class="clean-list">${s.fields.map(f=>`<div>✓ ${h(fieldLabel(f))}</div>`).join('')}${(s.attachments||[]).map(a=>`<div>+ ${h(attachmentLabel(attachmentMeta(a)))}</div>`).join('')}</div></div></div></section>`;
 }
 function housingRequestInfo(data={}){
-  const e=housingEligibility(state.user),total=calculatedHousingTotal(data,state.user);return `<div class="eligibility-card ${e.eligible?'ok':'blocked'}"><div><strong>${tr('استحقاق بدل السكن','Housing Allowance Eligibility')}</strong><p>${h(housingEligibilityText(state.user))}</p></div>${e.eligible?`<div class="eligibility-metrics"><span>${tr('تاريخ التعيين','Joining Date')}<strong>${h(state.user.joiningDate)}</strong></span><span>${tr('بدل السكن الشهري','Monthly Housing Allowance')}<strong>${h(state.user.housingAllowance||0)} ${tr('ريال','SAR')}</strong></span><span>${tr('الإجمالي حسب اختيارك','Total from your selection')}<strong>${h(total||0)} ${tr('ريال','SAR')}</strong></span></div>`:''}</div>`
+  const e=housingEligibility(state.user),amountState=housingAmountStatus(data,state.user),installment=housingEstimatedInstallment(data);
+  const warning=amountState.reason==='OVER_LIMIT'?`<div class="amount-warning">${tr(`المبلغ المطلوب أعلى من الحد المتاح بـ ${formatMoney(amountState.overBy)} ريال. خفض المبلغ قبل المتابعة.`,`Requested amount is ${formatMoney(amountState.overBy)} SAR above the available limit. Reduce it before continuing.`)}</div>`:'';
+  return `<div class="eligibility-card ${e.eligible?'ok':'blocked'}"><div><strong>${tr('استحقاق بدل السكن','Housing Allowance Eligibility')}</strong><p>${h(housingEligibilityText(state.user))}</p><p>${tr('اختر سقف الاستحقاق المناسب ثم اكتب المبلغ الذي تحتاجه فعليا. المبلغ المطلوب يمكن أن يكون أقل من السقف، لكنه لا يمكن أن يتجاوزه.','Choose an eligible ceiling, then enter the amount you actually need. The requested amount may be lower than the ceiling but cannot exceed it.')}</p></div>${e.eligible?`<div class="eligibility-metrics housing-metrics"><span>${tr('تاريخ التعيين','Joining Date')}<strong>${h(state.user.joiningDate)}</strong></span><span>${tr('بدل السكن الشهري','Monthly Housing Allowance')}<strong>${h(formatMoney(state.user.housingAllowance||0))} ${tr('ريال','SAR')}</strong></span><span>${tr('الحد الأعلى حسب اختيارك','Maximum Based on Selection')}<strong>${h(formatMoney(amountState.ceiling||0))} ${tr('ريال','SAR')}</strong></span><span>${tr('المبلغ المطلوب','Requested Amount')}<strong>${amountState.requested?h(formatMoney(amountState.requested)):tr('لم يحدد بعد','Not entered yet')} ${amountState.requested?tr('ريال','SAR'):''}</strong></span><span>${tr('المتبقي من السقف','Remaining Under Ceiling')}<strong>${amountState.requested&&amountState.ceiling?h(formatMoney(Math.max(0,amountState.ceiling-amountState.requested))):'—'} ${amountState.requested?tr('ريال','SAR'):''}</strong></span><span>${tr('القسط التقديري','Estimated Installment')}<strong>${installment?h(formatMoney(installment)):tr('يحسب بعد اختيار مدة السداد','Calculated after repayment period')} ${installment?tr('ريال','SAR'):''}</strong></span></div>${warning}`:''}</div>`
 }
 function newRequestPanel(){
   const s=serviceById(state.activeServiceId);if(!s)return servicesPanel();const editing=!!state.editRequestId;if(state.wizardStep===2)return reviewPanel();const req=editing?state.requests.find(r=>r.id===state.editRequestId):null;const data=state.draft||{};const fields=visibleFields(s,data);const attachments=visibleAttachments(s,data);const blocked=s.id==='housing'&&!housingEligibility(state.user).eligible;
-  return `<section><div class="wizard-head"><div><span class="eyebrow">${editing?tr('استكمال طلب معاد','Complete Returned Request'):tr('طلب جديد','New Request')} · ${h(s.code)}</span><h2>${h(serviceName(s))}</h2></div><div class="wizard"><b class="active">1 ${tr('البيانات','Data')}</b><b>2 ${tr('النموذج والمراجعة','Form & Review')}</b><b>3 ${tr('الإرسال','Submit')}</b></div></div>${editing?`<div class="return-box"><strong>${tr('سبب الإعادة','Return Reason')}</strong><span>${h(req.returnContext?.reason||'')}</span><small>${tr('المطلوب','Required')}: ${h(scopeName(req.returnContext?.scope))}</small></div>`:''}${s.id==='housing'?housingRequestInfo(data):''}<form id="requestForm" class="form-layout"><div class="card"><div class="prefill"><h3>${tr('بيانات من الحساب','Profile Data')}</h3><div><span>${tr('الاسم','Name')}<strong>${h(userName(state.user))}</strong></span><span>${tr('الرقم الوظيفي','Employee ID')}<strong>${h(state.user.id)}</strong></span><span>${tr('القسم','Department')}<strong>${h(deptName(state.user.departmentId))}</strong></span><span>${tr('المدير المباشر','Direct Manager')}<strong>${h(userName(userById(state.user.managerId)))}</strong></span></div></div><div class="form-grid">${fields.map(f=>`<label class="field ${f.type==='textarea'?'wide':''}"><span>${h(fieldLabel(f))}${fieldRequired(f,data)?' *':''}</span>${fieldControl(f,data[f.id]||'',data,s,state.user)}</label>`).join('')}</div>${attachments.length?`<div class="attachments"><h3>${tr('المرفقات المطلوبة','Required Attachments')}</h3>${attachments.map(a=>`<label class="upload"><span>＋</span><div><strong>${h(attachmentLabel(a))}</strong><small>${data.attachments?.[a.id]?`${tr('الملف الحالي','Current file')}: ${h(data.attachments[a.id])}`:tr('PDF أو صورة','PDF or image')}</small></div><input type="file" data-attachment-id="${h(a.id)}" accept="${h(a.accept||'.pdf,.png,.jpg,.jpeg')}"></label>`).join('')}</div>`:''}<div class="form-actions"><button type="button" class="primary" id="reviewBtn" ${blocked?'disabled':''}>${tr('مراجعة النموذج','Review Form')}</button></div></div><aside class="side-stack"><div class="card"><h3>${tr('المسار المتوقع','Expected Workflow')}</h3><div class="route-list small-route">${serviceTemplate(s.id).map((x,i)=>`<div><b>${i+1}</b><span><strong>${h(stepLabel(x))}</strong><small>${h(resolverText(x.resolver))}</small></span></div>`).join('')}</div></div><div class="notice">${tr('لن يصل إشعار لأي مرحلة مستقبلية. يتم إخطار المسؤول الحالي فقط.','Future stages are not notified. Only the current responsible approver receives an action notification.')}</div></aside></form></section>`;
+  return `<section><div class="wizard-head"><div><span class="eyebrow">${editing?tr('استكمال طلب معاد','Complete Returned Request'):tr('طلب جديد','New Request')} · ${h(s.code)}</span><h2>${h(serviceName(s))}</h2></div><div class="wizard"><b class="active">1 ${tr('البيانات','Data')}</b><b>2 ${tr('النموذج والمراجعة','Form & Review')}</b><b>3 ${tr('الإرسال','Submit')}</b></div></div>${editing?`<div class="return-box"><strong>${tr('سبب الإعادة','Return Reason')}</strong><span>${h(req.returnContext?.reason||'')}</span><small>${tr('المطلوب','Required')}: ${h(scopeName(req.returnContext?.scope))}</small></div>`:''}${s.id==='housing'?housingRequestInfo(data):''}<form id="requestForm" class="form-layout"><div class="card"><div class="prefill"><h3>${tr('بيانات من الحساب','Profile Data')}</h3><div><span>${tr('الاسم','Name')}<strong>${h(userName(state.user))}</strong></span><span>${tr('الرقم الوظيفي','Employee ID')}<strong>${h(state.user.id)}</strong></span><span>${tr('القسم','Department')}<strong>${h(deptName(state.user.departmentId))}</strong></span><span>${tr('المدير المباشر','Direct Manager')}<strong>${h(userName(userById(state.user.managerId)))}</strong></span></div></div><div class="form-grid">${fields.map(f=>`<label class="field ${f.type==='textarea'?'wide':''}"><span>${h(fieldLabel(f))}${fieldRequired(f,data)?' *':''}</span>${fieldControl(f,data[f.id]||'',data,s,state.user)}${(isEn()?f.helpEn:f.help)?`<small class="field-help">${h(isEn()?f.helpEn:f.help)}</small>`:''}</label>`).join('')}</div>${attachments.length?`<div class="attachments"><h3>${tr('المرفقات المطلوبة','Required Attachments')}</h3>${attachments.map(a=>`<label class="upload"><span>＋</span><div><strong>${h(attachmentLabel(a))}</strong><small>${data.attachments?.[a.id]?`${tr('الملف الحالي','Current file')}: ${h(data.attachments[a.id])}`:tr('PDF أو صورة','PDF or image')}</small></div><input type="file" data-attachment-id="${h(a.id)}" accept="${h(a.accept||'.pdf,.png,.jpg,.jpeg')}"></label>`).join('')}</div>`:''}<div class="form-actions"><button type="button" class="primary" id="reviewBtn" ${blocked?'disabled':''}>${tr('مراجعة النموذج','Review Form')}</button></div></div><aside class="side-stack"><div class="card"><h3>${tr('المسار المتوقع','Expected Workflow')}</h3><div class="route-list small-route">${serviceTemplate(s.id).map((x,i)=>`<div><b>${i+1}</b><span><strong>${h(stepLabel(x))}</strong><small>${h(resolverText(x.resolver))}</small></span></div>`).join('')}</div></div><div class="notice">${tr('لن يصل إشعار لأي مرحلة مستقبلية. يتم إخطار المسؤول الحالي فقط.','Future stages are not notified. Only the current responsible approver receives an action notification.')}</div></aside></form></section>`;
 }
 function scopeName(v){const ar={data:'تعديل البيانات',attachments:'استكمال المرفقات',stage_note:'استكمال ملاحظة المرحلة',other:'استكمال حسب الملاحظة'},en={data:'Update Data',attachments:'Complete Attachments',stage_note:'Complete Stage Note',other:'Complete as Instructed'};return (isEn()?en:ar)[v]||v||tr('غير محدد','Not specified')}
 function reviewPanel(){const s=serviceById(state.activeServiceId),editing=!!state.editRequestId;return `<section><div class="wizard-head"><button class="back-btn" id="backToForm">${tr('رجوع للتعديل','Back to Edit')}</button><div><span class="eyebrow">${editing?tr('إعادة إرسال بعد الاستكمال','Resubmit After Completion'):tr('مراجعة قبل الإرسال','Review Before Submission')}</span><h2>${tr('راجع البيانات التي ستنتقل مع النموذج في مسار الموافقات','Review the data that will move with the form through the approval workflow')}</h2></div><div class="wizard"><b>1 ${tr('البيانات','Data')}</b><b class="active">2 ${tr('النموذج والمراجعة','Form & Review')}</b><b>3 ${tr('الإرسال','Submit')}</b></div></div><div class="review-layout"><div>${formPreview(s,state.draft,null)}</div><aside class="side-stack"><div class="card"><h3>${tr('الإقرار الإلكتروني','Electronic Declaration')}</h3><label class="ack"><input type="checkbox" id="employeeAck"><span>${h(localized(s.form,'declaration',''))}</span></label><p class="muted">${tr('عند الإرسال يسجل النظام الحساب والتاريخ ورقم المعاملة كاعتماد إلكتروني للموظف.','On submission, the account, date and request number are recorded as the employee electronic approval.')}</p><button class="primary full" id="submitBtn">${editing?tr('إعادة إرسال الطلب','Resubmit Request'):tr('إرسال الطلب للموافقة','Submit for Approval')}</button><button class="outline full" id="backToForm2">${tr('تعديل البيانات','Edit Data')}</button></div></aside></div></section>`}
@@ -624,7 +644,7 @@ function bind(){
   document.querySelector('#serviceSearch')?.addEventListener('input',e=>{const q=e.target.value.toLowerCase();document.querySelector('#serviceGrid').innerHTML=services.filter(s=>s.active&&serviceSearchText(s).includes(normalizeArabic(q))).map(serviceCard).join('')||`<div class="empty">${tr('لا توجد نتائج','No results')}</div>`;bind()});
   const currentService=serviceById(state.activeServiceId);
   const driverIds=new Set();
-  (currentService?.fields||[]).forEach(f=>{if(f.dynamicOptions)driverIds.add(f.id);
+  (currentService?.fields||[]).forEach(f=>{if(f.dynamicOptions||f.validation==='HOUSING_REQUEST_AMOUNT'||(currentService?.id==='housing'&&f.id==='repaymentMonths'))driverIds.add(f.id);
     [f.showWhen,f.requiredWhen,...(f.showWhenAny||[]),...(f.requiredWhenAny||[])].filter(Boolean).forEach(c=>driverIds.add(c.field));
   });
   (currentService?.attachments||[]).map(attachmentMeta).forEach(a=>[a.showWhen,a.requiredWhen].filter(Boolean).forEach(c=>driverIds.add(c.field)));
@@ -652,5 +672,282 @@ function render(){
   const panels={home:homePanel,assistant:assistantPanel,services:servicesPanel,service:servicePanel,'new-request':newRequestPanel,'my-requests':myRequestsPanel,approvals:approvalsPanel,notifications:notificationsPanel,request:requestPanel,organization:organizationPanel,oversight:oversightPanel,'workflow-admin':workflowAdminPanel,knowledge:knowledgePanel};
   const fn=panels[state.panel]||homePanel;app.innerHTML=`<div class="shell">${sidebar()}<main class="main">${topbar()}${fn()}</main></div>`;bind();
 }
+
+/* Phase 8: Approval Matrix + Editable Organization Directory */
+KEYS.directoryUsers='ndr_p8_directory_users_v1';
+KEYS.directoryDepartments='ndr_p8_directory_departments_v1';
+KEYS.workflowMatrix='ndr_p8_workflow_matrix_v1';
+
+const PHASE8_DEFAULT_USERS=clone(users);
+const PHASE8_DEFAULT_DEPARTMENTS=clone(departments);
+const storedDirectoryUsers=load(KEYS.directoryUsers,null);
+const storedDirectoryDepartments=load(KEYS.directoryDepartments,null);
+if(Array.isArray(storedDirectoryUsers)&&storedDirectoryUsers.length){users.splice(0,users.length,...clone(storedDirectoryUsers));}
+if(Array.isArray(storedDirectoryDepartments)&&storedDirectoryDepartments.length){departments.splice(0,departments.length,...clone(storedDirectoryDepartments));}
+users.forEach(u=>{if(u.active===undefined)u.active=true});
+departments.forEach(d=>{if(d.active===undefined)d.active=true});
+state.workflowMatrix=load(KEYS.workflowMatrix,{});
+state.approvalServiceId=state.approvalServiceId||services.find(s=>s.active)?.id||null;
+state.approvalDepartmentId=state.approvalDepartmentId||'*';
+state.user=userById(state.user?.id)||null;
+
+function persistDirectory(){save(KEYS.directoryUsers,users);save(KEYS.directoryDepartments,departments)}
+function persistWorkflowMatrix(){save(KEYS.workflowMatrix,state.workflowMatrix)}
+function activeUsers(){return users.filter(u=>u.active!==false)}
+function activeDepartments(){return departments.filter(d=>d.active!==false)}
+function generalManagerId(){return managerIdForDepartment('executive')||activeUsers().find(u=>u.role==='executive')?.id||null}
+function canManageDirectory(){return !!state.user&&(hasPermission('org_manage')||state.user.departmentId==='hr')}
+function canDesignWorkflows(){return !!state.user&&(hasPermission('workflow_design')||hasPermission('workflow_override_hr')||hasPermission('workflow_override_all')||state.user.departmentId==='hr')}
+function directManagerIdFor(user){
+  const explicit=user?.managerId;
+  if(explicit&&userById(explicit)?.active!==false)return explicit;
+  const deptManager=managerIdForDepartment(user?.departmentId);
+  return deptManager&&deptManager!==user?.id?deptManager:null;
+}
+function workflowMatrixEntry(serviceId,departmentId){return state.workflowMatrix?.[serviceId]?.[departmentId]||null}
+function workflowBaseTemplate(serviceId){return clone(state.workflowOverrides[serviceId]||serviceById(serviceId)?.workflowTemplate||[])}
+function workflowDefinition(serviceId,departmentId='*'){
+  const perService=state.workflowMatrix?.[serviceId]||{};
+  if(departmentId!=='*'&&Array.isArray(perService[departmentId]))return {steps:clone(perService[departmentId]),source:'DEPARTMENT'};
+  if(Array.isArray(perService['*']))return {steps:clone(perService['*']),source:'DEFAULT'};
+  return {steps:workflowBaseTemplate(serviceId),source:'BUILT_IN'};
+}
+
+roleName=function(role){
+  const ar={employee:'موظف',supervisor:'مشرف',specialist:'مختص',manager:'مدير قسم',executive:'مدير عام',system_admin:'مدير النظام'};
+  const en={employee:'Employee',supervisor:'Supervisor',specialist:'Specialist',manager:'Department Manager',executive:'General Manager',system_admin:'System Administrator'};
+  return (isEn()?en:ar)[role]||role;
+};
+membersOfDepartment=function(deptId){return activeUsers().filter(u=>u.departmentId===deptId&&u.role!=='system_admin')};
+serviceTemplate=function(serviceId,ownerDepartmentId=undefined){
+  const dept=ownerDepartmentId===undefined?state.user?.departmentId:ownerDepartmentId;
+  const perService=state.workflowMatrix?.[serviceId]||{};
+  if(dept&&Array.isArray(perService[dept]))return clone(perService[dept]);
+  if(Array.isArray(perService['*']))return clone(perService['*']);
+  return workflowBaseTemplate(serviceId);
+};
+resolverText=function(resolver){
+  if(!resolver)return tr('غير محدد','Not defined');
+  if(resolver.type==='DIRECT_MANAGER')return tr('المدير/المشرف المباشر','Direct Manager / Supervisor');
+  if(resolver.type==='OWNER_DEPARTMENT_MANAGER')return tr('مدير قسم مقدم الطلب','Requester Department Manager');
+  if(resolver.type==='GENERAL_MANAGER')return tr('المدير العام','General Manager');
+  if(resolver.type==='NAMED_USER')return userName(userById(resolver.userId))||tr('مستخدم محدد','Named User');
+  if(resolver.type==='DEPARTMENT_MANAGER_FIXED')return `${tr('مدير','Manager -')} ${deptName(resolver.departmentId)}`;
+  if(resolver.type==='ROLE_IN_DEPARTMENT')return `${roleName(resolver.role)} - ${deptName(resolver.departmentId)}`;
+  if(resolver.type==='ROLE_IN_OWNER_DEPARTMENT')return `${roleName(resolver.role)} - ${tr('قسم مقدم الطلب','Requester Department')}`;
+  if(resolver.type==='HR_RESPONSIBLE')return userName(userById(resolver.preferredUserId))||tr('المختص المسؤول في الموارد البشرية','Assigned HR Reviewer');
+  if(resolver.type==='MANUAL')return tr('مسار يدوي','Manual Route');
+  return resolver.type;
+};
+resolveStep=function(step,owner,serviceId,context={}){
+  const r=step.resolver||{};let assignments=[];
+  const addPrincipal=id=>{if(id&&userById(id)?.active!==false)assignments.push(effectiveAssignment(id,serviceId))};
+  if(r.type==='DIRECT_MANAGER')addPrincipal(directManagerIdFor(owner));
+  if(r.type==='OWNER_DEPARTMENT_MANAGER')addPrincipal(managerIdForDepartment(owner.departmentId));
+  if(r.type==='GENERAL_MANAGER')addPrincipal(generalManagerId());
+  if(r.type==='DEPARTMENT_MANAGER_FIXED')addPrincipal(managerIdForDepartment(r.departmentId));
+  if(r.type==='NAMED_USER'){
+    let id=r.userId;
+    if((r.excludeOwner&&id===owner.id)||userById(id)?.active===false){
+      id=r.fallbackUserId||activeUsers().find(u=>u.departmentId===r.departmentId&&u.role===r.fallbackRole&&u.id!==owner.id)?.id||managerIdForDepartment(r.departmentId);
+    }
+    addPrincipal(id);
+  }
+  if(r.type==='HR_RESPONSIBLE'){
+    const previous=new Set(context.previousAssigneeIds||[]);
+    const candidates=[r.preferredUserId,'E001','HRM01','E002'].filter(Boolean).filter((id,i,a)=>a.indexOf(id)===i).filter(id=>id!==owner.id&&!previous.has(id)&&userById(id)?.active!==false);
+    addPrincipal(candidates[0]||activeUsers().find(u=>u.departmentId==='hr'&&u.id!==owner.id)?.id);
+  }
+  if(r.type==='ROLE_IN_DEPARTMENT')activeUsers().filter(u=>u.departmentId===r.departmentId&&u.role===r.role&&(!r.excludeOwner||u.id!==owner.id)).forEach(u=>addPrincipal(u.id));
+  if(r.type==='ROLE_IN_OWNER_DEPARTMENT')activeUsers().filter(u=>u.departmentId===owner.departmentId&&u.role===r.role&&(!r.excludeOwner||u.id!==owner.id)).forEach(u=>addPrincipal(u.id));
+  const seen=new Set();assignments=assignments.filter(a=>a.userId&&!seen.has(a.userId)&&(seen.add(a.userId),true));
+  return assignments;
+};
+instantiateRoute=function(service,owner){
+  const route=[];
+  serviceTemplate(service.id,owner.departmentId).forEach((s,i)=>{
+    const previousAssigneeIds=route.at(-1)?.assigneeIds||[];
+    const assignments=resolveStep(s,owner,service.id,{previousAssigneeIds});
+    route.push({id:s.id||`step-${i+1}`,label:s.label||tr(`المرحلة ${i+1}`,`Stage ${i+1}`),labelEn:s.labelEn||'',resolverSnapshot:clone(s.resolver||{}),stageFields:clone(s.stageFields||[]),mode:s.mode||'SEQUENTIAL',assignments,assigneeIds:assignments.map(a=>a.userId),state:'waiting',approvals:[]});
+  });
+  return route;
+};
+
+function resolverReferencesUser(resolver,userId){return !!resolver&&((resolver.type==='NAMED_USER'&&resolver.userId===userId)||(resolver.type==='HR_RESPONSIBLE'&&resolver.preferredUserId===userId))}
+function userReferenceSummary(userId){
+  const pending=state.requests.filter(r=>['pending','returned'].includes(r.status)&&r.route?.some(s=>s.assigneeIds?.includes(userId))).length;
+  const owned=state.requests.filter(r=>r.ownerId===userId).length;
+  const deptManager=departments.filter(d=>managerIdForDepartment(d.id)===userId).map(d=>deptName(d.id));
+  const activeDels=state.delegations.filter(d=>d.active!==false&&(d.principalId===userId||d.delegateId===userId));
+  const matrixRefs=[];
+  Object.entries(state.workflowMatrix||{}).forEach(([serviceId,byDept])=>Object.entries(byDept||{}).forEach(([deptId,steps])=>{if((steps||[]).some(s=>resolverReferencesUser(s.resolver,userId)))matrixRefs.push(`${serviceId}:${deptId}`)}));
+  Object.entries(state.workflowOverrides||{}).forEach(([serviceId,steps])=>{if(Array.isArray(steps)&&(steps||[]).some(s=>resolverReferencesUser(s.resolver,userId)))matrixRefs.push(`${serviceId}:legacy`)});
+  return {pending,owned,deptManager,activeDels,matrixRefs};
+}
+function canHardDeleteUser(userId){
+  if(state.user?.id===userId)return {ok:false,reason:tr('لا يمكن حذف الحساب المستخدم حاليا.','You cannot delete the currently signed-in account.')};
+  const refs=userReferenceSummary(userId);
+  if(refs.pending||refs.owned||refs.deptManager.length||refs.activeDels.length||refs.matrixRefs.length||state.notifications.some(n=>n.userId===userId))return {ok:false,reason:tr('للحساب ارتباطات أو معاملات تاريخية. عطله بدلا من حذفه حتى يبقى سجل التدقيق صحيحا.','This account has historical or active references. Deactivate it instead so the audit trail remains valid.')};
+  return {ok:true};
+}
+function deactivateUser(userId){
+  const u=userById(userId);if(!u)return;
+  if(state.user?.id===userId){toast(tr('لا يمكن تعطيل حسابك أثناء استخدامه.','You cannot deactivate your own active session.'),'error');return}
+  const refs=userReferenceSummary(userId);
+  if(refs.pending||refs.deptManager.length||refs.activeDels.length||refs.matrixRefs.length){toast(tr('أعد توزيع الاعتمادات الحالية والمديريات والتفويضات قبل تعطيل الحساب.','Reassign current approvals, department management and delegations before deactivating this account.'),'error');return}
+  u.active=false;persistDirectory();toast(tr('تم تعطيل الحساب مع الاحتفاظ بسجله التاريخي.','Account deactivated while preserving its history.'),'success');render();
+}
+function activateUser(userId){const u=userById(userId);if(!u)return;u.active=true;persistDirectory();toast(tr('تم تفعيل الحساب.','Account activated.'),'success');render()}
+function hardDeleteUser(userId){const check=canHardDeleteUser(userId);if(!check.ok){toast(check.reason,'error');return}const i=users.findIndex(u=>u.id===userId);if(i>=0){users.splice(i,1);persistDirectory();toast(tr('تم حذف الحساب غير المرتبط بأي سجل.','Unreferenced account deleted.'),'success');render()}}
+function defaultPermissions(role,departmentId){
+  const p=[];
+  if(role==='manager')p.push('approve_department','view_department');
+  if(role==='executive')p.push('approve_executive','view_all','workflow_override_all','audit_all','org_manage','delegation_manage');
+  if(role==='system_admin')p.push('system_admin','workflow_design','org_manage','delegation_manage','view_all');
+  if(departmentId==='hr'&&['employee','supervisor','specialist','manager'].includes(role))p.push('workflow_override_hr');
+  if(departmentId==='hr'&&role==='specialist')p.push('approve_hr');
+  return [...new Set(p)];
+}
+function saveDirectoryUser(payload,originalId=null){
+  const id=String(payload.id||'').trim();if(!id){toast(tr('الرقم الوظيفي مطلوب.','Employee ID is required.'),'error');return false}
+  const existing=userById(id);if(!originalId&&existing){toast(tr('الرقم الوظيفي مستخدم مسبقا.','Employee ID already exists.'),'error');return false}
+  if(originalId&&id!==originalId){toast(tr('لا يمكن تغيير الرقم الوظيفي بعد إنشاء الحساب حفاظا على السجل التاريخي.','Employee ID cannot be changed after account creation because it is part of the audit trail.'),'error');return false}
+  const record={id,name:payload.name.trim(),nameEn:(payload.nameEn||'').trim(),email:(payload.email||'').trim(),title:payload.title.trim(),titleEn:(payload.titleEn||'').trim(),departmentId:payload.departmentId,managerId:payload.managerId||null,role:payload.role,permissions:defaultPermissions(payload.role,payload.departmentId),joiningDate:payload.joiningDate||'',housingAllowance:Number(payload.housingAllowance||0),active:payload.active!==false};
+  if(!record.name||!record.title||!record.departmentId){toast(tr('الاسم والمسمى والقسم حقول مطلوبة.','Name, title and department are required.'),'error');return false}
+  if(originalId){const idx=users.findIndex(u=>u.id===originalId);users[idx]={...users[idx],...record};}else users.push(record);
+  persistDirectory();state.user=userById(state.user?.id)||state.user;return true;
+}
+function saveDirectoryDepartment(payload,originalId=null){
+  const id=String(payload.id||'').trim().toLowerCase().replace(/\s+/g,'-');if(!id){toast(tr('رمز القسم مطلوب.','Department code is required.'),'error');return false}
+  if(!originalId&&deptById(id)){toast(tr('رمز القسم مستخدم مسبقا.','Department code already exists.'),'error');return false}
+  if(originalId&&id!==originalId){toast(tr('لا يمكن تغيير رمز القسم بعد إنشائه حاليا.','Department code cannot currently be changed after creation.'),'error');return false}
+  const record={id,name:payload.name.trim(),nameEn:(payload.nameEn||'').trim(),managerId:payload.managerId||null,description:(payload.description||'').trim(),descriptionEn:(payload.descriptionEn||'').trim(),active:payload.active!==false};
+  if(!record.name){toast(tr('اسم القسم مطلوب.','Department name is required.'),'error');return false}
+  if(originalId){const idx=departments.findIndex(d=>d.id===originalId);departments[idx]={...departments[idx],...record};}else departments.push(record);
+  state.orgOverrides[id]={...(state.orgOverrides[id]||{}),managerId:record.managerId};save(KEYS.org,state.orgOverrides);persistDirectory();return true;
+}
+function toggleDepartment(deptId){
+  const d=deptById(deptId);if(!d||deptId==='system'||deptId==='executive')return;
+  if(d.active!==false&&activeUsers().some(u=>u.departmentId===deptId)){toast(tr('انقل أو عطل موظفي القسم أولا قبل تعطيل القسم.','Move or deactivate the department employees before deactivating the department.'),'error');return}
+  d.active=d.active===false;persistDirectory();render();
+}
+
+saveDeptManager=function(deptId,userId){
+  const d=deptById(deptId);if(d)d.managerId=userId||null;
+  state.orgOverrides[deptId]={...(state.orgOverrides[deptId]||{}),managerId:userId||null};save(KEYS.org,state.orgOverrides);persistDirectory();toast(tr('تم تحديث المدير الرئيسي للقسم.','Primary department manager updated.'),'success');render();
+};
+
+function roleOptions(selected='employee'){
+  const roles=['employee','supervisor','specialist','manager','executive'];
+  return roles.map(r=>`<option value="${r}" ${r===selected?'selected':''}>${h(roleName(r))}</option>`).join('');
+}
+function userOptions(selected='',filter=()=>true,includeBlank=true){
+  return `${includeBlank?`<option value="">${tr('بدون','None')}</option>`:''}${activeUsers().filter(filter).map(u=>`<option value="${h(u.id)}" ${u.id===selected?'selected':''}>${h(userName(u))} — ${h(userTitle(u))}</option>`).join('')}`;
+}
+function departmentOptions(selected='',includeAll=false){
+  return `${includeAll?`<option value="*">${tr('كل الأقسام - المسار الافتراضي','All Departments - Default Workflow')}</option>`:''}${activeDepartments().filter(d=>d.id!=='system').map(d=>`<option value="${h(d.id)}" ${d.id===selected?'selected':''}>${h(deptName(d.id))}</option>`).join('')}`;
+}
+function openUserEditor(userId=null){
+  if(!canManageDirectory())return;const u=userId?userById(userId):null;const dept=u?.departmentId||'hr';
+  modal(`<div class="modal-head"><div><span class="eyebrow">${u?tr('تعديل حساب','Edit Account'):tr('إضافة حساب','Add Account')}</span><h3>${u?h(userName(u)):tr('موظف جديد','New Employee')}</h3></div><button class="modal-x">×</button></div><div class="modal-grid"><label class="field"><span>${tr('الرقم الوظيفي','Employee ID')} *</span><input id="duId" value="${h(u?.id||'')}" ${u?'disabled':''}></label><label class="field"><span>${tr('البريد','Email')}</span><input id="duEmail" type="email" value="${h(u?.email||'')}"></label><label class="field"><span>${tr('الاسم بالعربي','Arabic Name')} *</span><input id="duName" value="${h(u?.name||'')}"></label><label class="field"><span>${tr('الاسم بالإنجليزي','English Name')}</span><input id="duNameEn" value="${h(u?.nameEn||'')}"></label><label class="field"><span>${tr('المسمى بالعربي','Arabic Title')} *</span><input id="duTitle" value="${h(u?.title||'')}"></label><label class="field"><span>${tr('المسمى بالإنجليزي','English Title')}</span><input id="duTitleEn" value="${h(u?.titleEn||'')}"></label><label class="field"><span>${tr('القسم','Department')} *</span><select id="duDept">${departmentOptions(dept)}</select></label><label class="field"><span>${tr('الدور الهيكلي','Organizational Role')}</span><select id="duRole">${roleOptions(u?.role||'employee')}</select></label><label class="field"><span>${tr('المدير/المشرف المباشر','Direct Manager / Supervisor')}</span><select id="duManager">${userOptions(u?.managerId||'',x=>x.id!==u?.id)}</select></label><label class="field"><span>${tr('تاريخ التعيين','Joining Date')}</span><input id="duJoin" type="date" value="${h(u?.joiningDate||'')}"></label><label class="field"><span>${tr('بدل السكن الشهري','Monthly Housing Allowance')}</span><input id="duHousing" type="number" min="0" step="0.01" value="${h(u?.housingAllowance||0)}"></label><label class="ack"><input id="duActive" type="checkbox" ${u?.active===false?'':'checked'}><span>${tr('الحساب نشط','Account Active')}</span></label></div><div class="modal-note">${tr('تغيير القسم أو المدير يؤثر على المسارات الجديدة فقط. الطلبات السابقة تحتفظ بالمسار الذي أنشئت عليه.','Changing department or manager affects new workflows only. Existing requests preserve the route captured when they were created.')}</div><div class="modal-actions"><button class="outline modal-cancel">${tr('إلغاء','Cancel')}</button><button class="primary" id="saveDirectoryUser">${tr('حفظ','Save')}</button></div>`);
+  const refreshManagers=()=>{const d=document.querySelector('#duDept').value;const select=document.querySelector('#duManager');const current=select.value;select.innerHTML=userOptions(current,x=>x.id!==u?.id&&(x.departmentId===d||x.role==='executive'));};
+  document.querySelector('#duDept')?.addEventListener('change',refreshManagers);refreshManagers();
+  document.querySelector('#saveDirectoryUser').onclick=()=>{const ok=saveDirectoryUser({id:u?.id||document.querySelector('#duId').value,name:document.querySelector('#duName').value,nameEn:document.querySelector('#duNameEn').value,email:document.querySelector('#duEmail').value,title:document.querySelector('#duTitle').value,titleEn:document.querySelector('#duTitleEn').value,departmentId:document.querySelector('#duDept').value,managerId:document.querySelector('#duManager').value,role:document.querySelector('#duRole').value,joiningDate:document.querySelector('#duJoin').value,housingAllowance:document.querySelector('#duHousing').value,active:document.querySelector('#duActive').checked},u?.id||null);if(ok){closeModal();toast(tr('تم حفظ بيانات الحساب.','Account details saved.'),'success');render()}};bindModalClose();
+}
+function openDepartmentEditor(deptId=null){
+  if(!canManageDirectory())return;const d=deptId?deptById(deptId):null;
+  modal(`<div class="modal-head"><div><span class="eyebrow">${d?tr('تعديل قسم','Edit Department'):tr('إضافة قسم','Add Department')}</span><h3>${d?h(deptName(d.id)):tr('قسم جديد','New Department')}</h3></div><button class="modal-x">×</button></div><div class="modal-grid"><label class="field"><span>${tr('رمز القسم','Department Code')} *</span><input id="ddId" value="${h(d?.id||'')}" ${d?'disabled':''}></label><label class="field"><span>${tr('المدير الرئيسي','Primary Manager')}</span><select id="ddManager">${userOptions(managerIdForDepartment(d?.id)||'')}</select></label><label class="field"><span>${tr('اسم القسم بالعربي','Arabic Department Name')} *</span><input id="ddName" value="${h(d?.name||'')}"></label><label class="field"><span>${tr('اسم القسم بالإنجليزي','English Department Name')}</span><input id="ddNameEn" value="${h(d?.nameEn||'')}"></label><label class="field wide"><span>${tr('الوصف بالعربي','Arabic Description')}</span><textarea id="ddDesc">${h(d?.description||'')}</textarea></label><label class="field wide"><span>${tr('الوصف بالإنجليزي','English Description')}</span><textarea id="ddDescEn">${h(d?.descriptionEn||'')}</textarea></label></div><div class="modal-actions"><button class="outline modal-cancel">${tr('إلغاء','Cancel')}</button><button class="primary" id="saveDirectoryDept">${tr('حفظ','Save')}</button></div>`);
+  document.querySelector('#saveDirectoryDept').onclick=()=>{const ok=saveDirectoryDepartment({id:d?.id||document.querySelector('#ddId').value,name:document.querySelector('#ddName').value,nameEn:document.querySelector('#ddNameEn').value,managerId:document.querySelector('#ddManager').value,description:document.querySelector('#ddDesc').value,descriptionEn:document.querySelector('#ddDescEn').value,active:d?.active!==false},d?.id||null);if(ok){closeModal();toast(tr('تم حفظ بيانات القسم.','Department saved.'),'success');render()}};bindModalClose();
+}
+
+organizationPanel=function(){
+  const canManage=canManageDirectory();const visibleDepartments=departments.filter(d=>d.id!=='system');
+  return `<section><div class="section-head"><div><h2>${tr('الهيكل الإداري وإدارة الحسابات','Organization & Account Management')}</h2><p>${tr('أضف الموظفين والمدراء والمشرفين وانقلهم بين الأقسام وحدد المدير المباشر. التغييرات الجديدة لا تعيد كتابة تاريخ الطلبات السابقة.','Add employees, managers and supervisors, move them between departments, and define direct reporting lines. New changes never rewrite historical request routes.')}</p></div><div class="actions">${canManage?`<button class="outline" id="addDepartmentBtn">${tr('+ قسم جديد','+ New Department')}</button><button class="primary" id="addUserBtn">${tr('+ موظف جديد','+ New Employee')}</button>`:''}${hasPermission('delegation_manage')?`<button class="outline" id="addDelegation">${tr('تفويض مؤقت','Temporary Delegation')}</button>`:''}</div></div><div class="org-grid">${visibleDepartments.map(d=>`<article class="card org-card ${d.active===false?'inactive-card':''}"><div class="org-head"><div><span class="tag">${h(d.id)}</span><h3>${h(deptName(d.id))}</h3><small>${h(localized(d,'description',''))}</small></div><div class="org-actions">${canManage?`<button class="mini-btn edit-dept" data-id="${h(d.id)}">${tr('تعديل','Edit')}</button>`:''}<span class="status ${d.active===false?'rejected':'done'}">${d.active===false?tr('غير نشط','Inactive'):tr('نشط','Active')}</span></div></div><label class="org-manager-field"><span>${tr('المدير الرئيسي','Primary Manager')}</span>${canManage?`<select class="dept-manager" data-dept="${h(d.id)}">${userOptions(managerIdForDepartment(d.id),u=>u.departmentId===d.id||u.role==='executive',false)}</select>`:`<strong>${h(userName(userById(managerIdForDepartment(d.id))))}</strong>`}</label><div class="member-list">${membersOfDepartment(d.id).map(u=>`<button class="member-row edit-user" data-id="${h(u.id)}"><span class="avatar mini">${h(userName(u).slice(0,1))}</span><div><strong>${h(userName(u))}</strong><small>${h(userTitle(u))} · ${roleName(u.role)}${directManagerIdFor(u)?` · ${tr('يتبع','Reports to')}: ${h(userName(userById(directManagerIdFor(u))))}`:''}</small></div></button>`).join('')||`<span class="muted">${tr('لا يوجد موظفون نشطون في هذا القسم','No active employees in this department')}</span>`}</div>${canManage&&d.id!=='system'&&d.id!=='executive'?`<button class="text-btn toggle-dept" data-id="${h(d.id)}">${d.active===false?tr('تفعيل القسم','Activate Department'):tr('تعطيل القسم','Deactivate Department')}</button>`:''}</article>`).join('')}</div><div class="card directory-card"><div class="card-head"><div><h3>${tr('دليل الحسابات','Account Directory')}</h3><span>${tr('الحذف الصلب متاح فقط للحساب الذي لا يملك أي ارتباط. غير ذلك يتم التعطيل حفاظا على سجل التدقيق.','Hard delete is only allowed when the account has no references. Otherwise use deactivation to preserve the audit trail.')}</span></div><strong>${users.length}</strong></div><div class="table-wrap"><table><thead><tr><th>${tr('الرقم','ID')}</th><th>${tr('الاسم','Name')}</th><th>${tr('القسم','Department')}</th><th>${tr('الدور','Role')}</th><th>${tr('المدير المباشر','Direct Manager')}</th><th>${tr('الحالة','Status')}</th><th>${tr('إجراءات','Actions')}</th></tr></thead><tbody>${users.filter(u=>u.role!=='system_admin'||hasPermission('system_admin')).map(u=>`<tr><td>${h(u.id)}</td><td><strong>${h(userName(u))}</strong><small class="table-sub">${h(userTitle(u))}</small></td><td>${h(deptName(u.departmentId))}</td><td>${h(roleName(u.role))}</td><td>${h(userName(userById(directManagerIdFor(u)))||tr('بدون','None'))}</td><td><span class="status ${u.active===false?'rejected':'done'}">${u.active===false?tr('معطل','Inactive'):tr('نشط','Active')}</span></td><td>${canManage?`<div class="row-actions"><button class="mini-btn edit-user" data-id="${h(u.id)}">${tr('تعديل','Edit')}</button>${u.active===false?`<button class="mini-btn activate-user" data-id="${h(u.id)}">${tr('تفعيل','Activate')}</button>`:`<button class="mini-btn deactivate-user" data-id="${h(u.id)}">${tr('تعطيل','Deactivate')}</button>`}<button class="danger-link hard-delete-user" data-id="${h(u.id)}">${tr('حذف','Delete')}</button></div>`:''}</td></tr>`).join('')}</tbody></table></div></div><div class="card delegation-card"><div class="card-head"><div><h3>${tr('التفويضات والبدلاء','Delegations & Acting Approvers')}</h3><span>${tr('البديل يعمل فقط خلال المدة والنطاق المحددين.','A delegate acts only during the configured period and scope.')}</span></div></div><div class="table-wrap"><table><thead><tr><th>${tr('الأصيل','Principal')}</th><th>${tr('البديل','Delegate')}</th><th>${tr('الفترة','Period')}</th><th>${tr('النطاق','Scope')}</th><th>${tr('الحالة','Status')}</th><th></th></tr></thead><tbody>${state.delegations.map(d=>`<tr><td>${h(userName(userById(d.principalId))||d.principalId)}</td><td>${h(userName(userById(d.delegateId))||d.delegateId)}</td><td>${h(d.startDate)} → ${h(d.endDate)}</td><td>${d.scope==='ALL'?tr('كل الخدمات','All Services'):h(serviceName(serviceById(d.scope))||d.scope)}</td><td>${(d.active!==false&&d.startDate<=today()&&d.endDate>=today())?`<span class="status done">${tr('ساري','Active')}</span>`:`<span class="status pending">${tr('غير ساري','Inactive')}</span>`}</td><td>${hasPermission('delegation_manage')?`<button class="danger-link delete-delegation" data-id="${h(d.id)}">${tr('حذف','Delete')}</button>`:''}</td></tr>`).join('')||`<tr><td colspan="6" class="empty">${tr('لا توجد تفويضات','No delegations')}</td></tr>`}</tbody></table></div></div></section>`;
+};
+
+function resolverPresetV8(r={}){
+  if(r.type==='DIRECT_MANAGER')return 'DIRECT_MANAGER';
+  if(r.type==='OWNER_DEPARTMENT_MANAGER')return 'OWNER_DEPARTMENT_MANAGER';
+  if(r.type==='GENERAL_MANAGER')return 'GENERAL_MANAGER';
+  if(r.type==='NAMED_USER')return `USER:${r.userId}`;
+  if(r.type==='DEPARTMENT_MANAGER_FIXED')return `DEPT_MANAGER:${r.departmentId}`;
+  if(r.type==='ROLE_IN_DEPARTMENT')return `ROLE:${r.departmentId}:${r.role}`;
+  if(r.type==='ROLE_IN_OWNER_DEPARTMENT')return `OWNER_ROLE:${r.role}`;
+  if(r.type==='HR_RESPONSIBLE')return `HR_RESPONSIBLE:${r.preferredUserId||'E001'}`;
+  return 'DIRECT_MANAGER';
+}
+function presetResolverV8(value){
+  if(value==='DIRECT_MANAGER')return {type:'DIRECT_MANAGER'};
+  if(value==='OWNER_DEPARTMENT_MANAGER')return {type:'OWNER_DEPARTMENT_MANAGER'};
+  if(value==='GENERAL_MANAGER')return {type:'GENERAL_MANAGER'};
+  const parts=value.split(':');const t=parts[0];
+  if(t==='USER')return {type:'NAMED_USER',userId:parts[1]};
+  if(t==='DEPT_MANAGER')return {type:'DEPARTMENT_MANAGER_FIXED',departmentId:parts[1]};
+  if(t==='ROLE')return {type:'ROLE_IN_DEPARTMENT',departmentId:parts[1],role:parts[2]};
+  if(t==='OWNER_ROLE')return {type:'ROLE_IN_OWNER_DEPARTMENT',role:parts[1]};
+  if(t==='HR_RESPONSIBLE')return {type:'HR_RESPONSIBLE',preferredUserId:parts[1]||'E001'};
+  return {type:'DIRECT_MANAGER'};
+}
+function detailedResolverOptions(selected=''){
+  const roles=['supervisor','manager','specialist','employee'];
+  const general=[['DIRECT_MANAGER',tr('المدير/المشرف المباشر حسب هيكل الموظف','Direct manager/supervisor from employee hierarchy')],['OWNER_DEPARTMENT_MANAGER',tr('مدير قسم مقدم الطلب','Requester department manager')],['GENERAL_MANAGER',tr('المدير العام','General Manager')],['HR_RESPONSIBLE:E001',tr('المختص المسؤول في الموارد البشرية - نادر افتراضيا','Assigned HR reviewer - Nader by default')]];
+  let html=`<optgroup label="${tr('مسارات ديناميكية','Dynamic routing')}">${general.map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${h(l)}</option>`).join('')}${roles.map(r=>`<option value="OWNER_ROLE:${r}" ${`OWNER_ROLE:${r}`===selected?'selected':''}>${h(tr(`أي ${roleName(r)} في قسم مقدم الطلب`,`Any ${roleName(r)} in requester department`))}</option>`).join('')}</optgroup>`;
+  html+=`<optgroup label="${tr('شخص محدد','Specific person')}">${activeUsers().filter(u=>u.role!=='system_admin').map(u=>`<option value="USER:${h(u.id)}" ${`USER:${u.id}`===selected?'selected':''}>${h(userName(u))} — ${h(deptName(u.departmentId))}</option>`).join('')}</optgroup>`;
+  html+=`<optgroup label="${tr('مدير قسم محدد','Specific department manager')}">${activeDepartments().filter(d=>d.id!=='system').map(d=>`<option value="DEPT_MANAGER:${h(d.id)}" ${`DEPT_MANAGER:${d.id}`===selected?'selected':''}>${h(tr('مدير','Manager'))} ${h(deptName(d.id))}</option>`).join('')}</optgroup>`;
+  html+=`<optgroup label="${tr('دور داخل قسم محدد','Role in specific department')}">${activeDepartments().filter(d=>d.id!=='system').flatMap(d=>roles.map(r=>`<option value="ROLE:${h(d.id)}:${r}" ${`ROLE:${d.id}:${r}`===selected?'selected':''}>${h(roleName(r))} — ${h(deptName(d.id))}</option>`)).join('')}</optgroup>`;
+  return html;
+}
+function approvalFlowPreview(steps=[]){
+  if(!steps.length)return `<div class="empty">${tr('لا توجد مراحل. أضف أول مرحلة اعتماد.','No stages. Add the first approval stage.')}</div>`;
+  return `<div class="approval-flow">${steps.map((s,i)=>`<div class="flow-node"><div class="flow-number">${i+1}</div><div><strong>${h(stepLabel(s))}</strong><span>${h(resolverText(s.resolver))}</span>${i===steps.length-1?`<b class="final-badge">${tr('اعتماد نهائي','Final Approval')}</b>`:''}</div></div>${i<steps.length-1?'<div class="flow-arrow">↓</div>':''}`).join('')}</div>`;
+}
+workflowAdminPanel=function(){
+  if(!canDesignWorkflows())return `<div class="card empty">${tr('لا توجد صلاحية لتصميم مسارات الموافقات.','You do not have permission to design approval workflows.')}</div>`;
+  const serviceId=state.approvalServiceId&&serviceById(state.approvalServiceId)?state.approvalServiceId:services.find(s=>s.active)?.id;const deptId=state.approvalDepartmentId||'*';const def=workflowDefinition(serviceId,deptId);const exact=workflowMatrixEntry(serviceId,deptId);const service=serviceById(serviceId);
+  return `<section><div class="section-head"><div><h2>${tr('مصمم الموافقات','Approval Workflow Designer')}</h2><p>${tr('حدد النموذج والقسم ثم ارسم المراحل بالترتيب. يمكن أن يكون لكل قسم مسار مختلف لنفس النموذج، أو تستخدم مسارا افتراضيا لكل الأقسام.','Choose a form and department, then build the approval stages in order. The same form may have a different route for each department, or use one default route for all departments.')}</p></div></div><div class="approval-toolbar card"><label class="field"><span>${tr('النموذج / الخدمة','Form / Service')}</span><select id="approvalServiceSelect">${services.filter(s=>s.active).map(s=>`<option value="${h(s.id)}" ${s.id===serviceId?'selected':''}>${h(s.code)} — ${h(serviceName(s))}</option>`).join('')}</select></label><label class="field"><span>${tr('القسم مقدم الطلب','Requester Department')}</span><select id="approvalDeptSelect">${departmentOptions(deptId,true)}</select></label><div class="approval-source"><span>${tr('مصدر المسار الحالي','Current Route Source')}</span><strong>${def.source==='DEPARTMENT'?tr('تخصيص لهذا القسم','Department-specific override'):def.source==='DEFAULT'?tr('المسار الافتراضي لجميع الأقسام','Default for all departments'):tr('القالب الأساسي للنظام','Built-in service template')}</strong></div></div><div class="approval-designer-grid"><div class="card"><div class="card-head"><div><span class="tag">${h(service?.code||'')}</span><h3>${h(serviceName(service))}</h3><span>${deptId==='*'?tr('المسار الافتراضي لجميع الأقسام','Default route for all departments'):deptName(deptId)}</span></div><button class="primary" id="editApprovalMatrix">${tr('تعديل المسار','Edit Workflow')}</button></div>${approvalFlowPreview(def.steps)}${deptId!=='*'&&!exact?`<div class="inherit-note">${tr('هذا القسم يرث المسار الافتراضي حاليا. أنشئ تخصيصا فقط إذا كان يحتاج مسارا مختلفا.','This department currently inherits the default workflow. Create an override only when it needs a different route.')}</div>`:''}</div><aside class="side-stack"><div class="card"><h3>${tr('قواعد التنفيذ','Execution Rules')}</h3><div class="clean-list"><div>✓ ${tr('الإشعار يذهب للمرحلة الحالية فقط','Only the current stage is notified')}</div><div>✓ ${tr('المرحلة التالية لا تبدأ قبل اكتمال الحالية','The next stage never starts before the current one finishes')}</div><div>✓ ${tr('مدير القسم يعيد للموظف فقط','Department manager can return only to the requester')}</div><div>✓ ${tr('الموارد البشرية تستطيع تعديل مسار طلب منفرد عند الحاجة','HR may adjust an individual request route when authorized')}</div><div>✓ ${tr('التفويض المؤقت يحول الاعتماد للبديل أثناء سريانه','Active delegation automatically routes approval to the delegate')}</div></div></div><div class="card"><h3>${tr('مثال','Example')}</h3><p class="muted">${tr('يمكن ضبط HR-F-25 لقسم التدريب: مدير/مشرف الموظف ← نادر. ويمكن ضبط نفس النموذج لقسم آخر: نادر مباشرة بدون مدير القسم.','HR-F-25 for Training can be: employee manager/supervisor → Nader. The same form for another department can be configured to go directly to Nader.')}</p></div></aside></div></section>`;
+};
+function matrixEditorRow(step,index,total){
+  return `<div class="matrix-row" data-id="${h(step.id||uid('S'))}"><div class="matrix-order"><button type="button" class="move-stage" data-dir="up" ${index===0?'disabled':''}>↑</button><button type="button" class="move-stage" data-dir="down" ${index===total-1?'disabled':''}>↓</button></div><input class="matrix-label" value="${h(step.label||tr(`المرحلة ${index+1}`,`Stage ${index+1}`))}" placeholder="${tr('اسم المرحلة','Stage name')}"><select class="matrix-resolver">${detailedResolverOptions(resolverPresetV8(step.resolver||{}))}</select><select class="matrix-mode"><option value="SEQUENTIAL" ${(step.mode||'SEQUENTIAL')==='SEQUENTIAL'?'selected':''}>SEQUENTIAL</option><option value="ANY" ${step.mode==='ANY'?'selected':''}>ANY</option><option value="ALL" ${step.mode==='ALL'?'selected':''}>ALL</option></select><button type="button" class="remove-row">×</button></div>`;
+}
+function openApprovalMatrixEditor(serviceId,deptId){
+  const current=workflowDefinition(serviceId,deptId).steps;const service=serviceById(serviceId);const title=deptId==='*'?tr('المسار الافتراضي لجميع الأقسام','Default Workflow for All Departments'):deptName(deptId);
+  modal(`<div class="modal-head"><div><span class="eyebrow">${h(service.code)} · ${h(serviceName(service))}</span><h3>${h(title)}</h3></div><button class="modal-x">×</button></div><div class="modal-note">${tr('رتب المراحل من الأعلى للأسفل. للحصول على موافقات متسلسلة من شخصين، أنشئ مرحلتين منفصلتين. ANY وALL مخصصتان لحالات الموافقة الجماعية في نفس المرحلة.','Order stages from top to bottom. For two sequential approvers, create two separate stages. ANY and ALL are reserved for multi-approver cases within one stage.')}</div><div id="matrixRows" class="matrix-rows">${current.map((s,i)=>matrixEditorRow(s,i,current.length)).join('')}</div><button class="outline" id="addMatrixStage">${tr('+ إضافة مرحلة','+ Add Stage')}</button><div class="modal-actions">${workflowMatrixEntry(serviceId,deptId)?`<button class="danger" id="deleteMatrixOverride">${tr('حذف التخصيص والرجوع للموروث','Remove Override & Inherit')}</button>`:''}<button class="outline modal-cancel">${tr('إلغاء','Cancel')}</button><button class="primary" id="saveMatrixWorkflow">${tr('حفظ المسار','Save Workflow')}</button></div>`);
+  const rerenderRows=()=>{const box=document.querySelector('#matrixRows');const rows=[...box.querySelectorAll('.matrix-row')].map(row=>({id:row.dataset.id,label:row.querySelector('.matrix-label').value,resolver:presetResolverV8(row.querySelector('.matrix-resolver').value),mode:row.querySelector('.matrix-mode').value}));box.innerHTML=rows.map((s,i)=>matrixEditorRow(s,i,rows.length)).join('')};
+  document.querySelector('#addMatrixStage').onclick=()=>{const box=document.querySelector('#matrixRows');box.insertAdjacentHTML('beforeend',matrixEditorRow({id:uid('S'),label:tr('مرحلة جديدة','New Stage'),resolver:{type:'DIRECT_MANAGER'},mode:'SEQUENTIAL'},box.querySelectorAll('.matrix-row').length,box.querySelectorAll('.matrix-row').length+1));rerenderRows()};
+  document.querySelector('#matrixRows').onclick=e=>{const row=e.target.closest('.matrix-row');if(!row)return;if(e.target.matches('.remove-row')){row.remove();rerenderRows();return}if(e.target.matches('.move-stage')){const dir=e.target.dataset.dir;if(dir==='up'&&row.previousElementSibling)row.parentNode.insertBefore(row,row.previousElementSibling);if(dir==='down'&&row.nextElementSibling)row.parentNode.insertBefore(row.nextElementSibling,row);rerenderRows();}};
+  document.querySelector('#saveMatrixWorkflow').onclick=()=>{const rows=[...document.querySelectorAll('#matrixRows .matrix-row')];if(!rows.length){toast(tr('أضف مرحلة واحدة على الأقل.','Add at least one approval stage.'),'error');return}const builtIn=service.workflowTemplate||[];const steps=rows.map((row,i)=>{const id=row.dataset.id||uid('S');const old=current.find(s=>s.id===id)||builtIn.find(s=>s.id===id);return {id,label:row.querySelector('.matrix-label').value.trim()||tr(`المرحلة ${i+1}`,`Stage ${i+1}`),labelEn:old?.labelEn||'',resolver:presetResolverV8(row.querySelector('.matrix-resolver').value),mode:row.querySelector('.matrix-mode').value,stageFields:clone(old?.stageFields||[])};});state.workflowMatrix[serviceId]=state.workflowMatrix[serviceId]||{};state.workflowMatrix[serviceId][deptId]=steps;persistWorkflowMatrix();closeModal();toast(tr('تم حفظ مسار الموافقات.','Approval workflow saved.'),'success');render()};
+  document.querySelector('#deleteMatrixOverride')?.addEventListener('click',()=>{delete state.workflowMatrix?.[serviceId]?.[deptId];if(state.workflowMatrix?.[serviceId]&&!Object.keys(state.workflowMatrix[serviceId]).length)delete state.workflowMatrix[serviceId];persistWorkflowMatrix();closeModal();toast(tr('تم حذف التخصيص وسيستخدم المسار الموروث.','Override removed; the inherited workflow will be used.'),'success');render()});bindModalClose();
+}
+
+
+isHRWorkflowController=function(){return state.user?.departmentId==='hr'&&['employee','supervisor','specialist','manager'].includes(state.user?.role)};
+canOverrideRoute=function(req){if(!state.user)return false;if(hasPermission('workflow_override_all'))return true;return isHRWorkflowController()};
+
+const phase7Sidebar=sidebar;
+sidebar=function(){
+  const approvalBadge=pendingForUser().length||'',notif=unreadCount()||'';
+  return `<aside class="sidebar"><div class="brand"><div class="brand-mark small">NDR</div><div><strong>Smart Hub</strong><small>Services & Approvals</small></div></div><div class="nav-title">${tr('مساحة العمل','Workspace')}</div><nav>${navButton('home',tr('الرئيسية','Home'))}${navButton('assistant','NDR AI')}${navButton('services',tr('الخدمات','Services'))}${navButton('my-requests',tr('طلباتي','My Requests'))}${navButton('notifications',tr('الإشعارات','Notifications'),notif)}${(approvalBadge||state.user.departmentId==='hr'||['supervisor','specialist','manager','executive'].includes(state.user.role))?navButton('approvals',tr('الموافقات','Approvals'),approvalBadge):''}${canManageDirectory()?navButton('organization',tr('الهيكل والحسابات','Organization & Accounts')):''}${hasPermission('view_all')?navButton('oversight',tr('الرقابة على الطلبات','Request Oversight')):''}${canDesignWorkflows()?navButton('workflow-admin',tr('تصميم الموافقات','Approval Designer')):''}${navButton('knowledge',tr('مركز المعرفة','Knowledge Center'))}</nav><div class="sidebar-foot"><div class="user-card"><span class="avatar">${h(userName(state.user).slice(0,1))}</span><div><strong>${h(userName(state.user))}</strong><small>${h(userTitle(state.user))} · ${roleName(state.user.role)}</small></div></div></div></aside>`;
+};
+const phase7PanelTitle=panelTitle;
+panelTitle=function(){if(state.panel==='workflow-admin')return tr('تصميم الموافقات','Approval Designer');if(state.panel==='organization')return tr('الهيكل والحسابات','Organization & Accounts');return phase7PanelTitle()};
+const phase7LoginView=loginView;
+loginView=function(){phase7LoginView();const select=document.querySelector('#loginUser');if(select)select.innerHTML=activeUsers().map(u=>`<option value="${u.id}">${h(userName(u))} — ${h(userTitle(u))}</option>`).join('')};
+routeEditorRow=function(step){return `<div class="route-row" data-id="${h(step.id)}"><input class="route-label" value="${h(step.label)}"><select class="route-user">${activeUsers().filter(u=>u.role!=='system_admin').map(u=>`<option value="${u.id}" ${step.assigneeIds?.includes(u.id)?'selected':''}>${h(userName(u))} - ${h(userTitle(u))}</option>`).join('')}</select><button class="remove-row" type="button">×</button></div>`};
+
+const phase7Bind=bind;
+bind=function(){
+  phase7Bind();
+  document.querySelector('#addUserBtn')?.addEventListener('click',()=>openUserEditor());
+  document.querySelector('#addDepartmentBtn')?.addEventListener('click',()=>openDepartmentEditor());
+  document.querySelectorAll('.edit-user').forEach(x=>x.onclick=()=>openUserEditor(x.dataset.id));
+  document.querySelectorAll('.edit-dept').forEach(x=>x.onclick=()=>openDepartmentEditor(x.dataset.id));
+  document.querySelectorAll('.deactivate-user').forEach(x=>x.onclick=()=>deactivateUser(x.dataset.id));
+  document.querySelectorAll('.activate-user').forEach(x=>x.onclick=()=>activateUser(x.dataset.id));
+  document.querySelectorAll('.hard-delete-user').forEach(x=>x.onclick=()=>hardDeleteUser(x.dataset.id));
+  document.querySelectorAll('.toggle-dept').forEach(x=>x.onclick=()=>toggleDepartment(x.dataset.id));
+  document.querySelector('#approvalServiceSelect')?.addEventListener('change',e=>{state.approvalServiceId=e.target.value;render()});
+  document.querySelector('#approvalDeptSelect')?.addEventListener('change',e=>{state.approvalDepartmentId=e.target.value;render()});
+  document.querySelector('#editApprovalMatrix')?.addEventListener('click',()=>openApprovalMatrixEditor(state.approvalServiceId,state.approvalDepartmentId));
+};
 
 render();

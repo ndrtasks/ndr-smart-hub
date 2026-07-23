@@ -55,7 +55,8 @@ export const services = [
       declarationEn:'I confirm the accuracy of the information and agree to the declaration and processing of this request under the approved authorities.'
     },
     fields:[
-      {id:'requestedMonths', label:'عدد أشهر بدل السكن المطلوبة', labelEn:'Requested Housing Allowance Months', type:'select', required:true, dynamicOptions:'HOUSING_ELIGIBILITY'},
+      {id:'requestedMonths', label:'سقف الاستحقاق المطلوب', labelEn:'Requested Eligibility Ceiling', type:'select', required:true, dynamicOptions:'HOUSING_ELIGIBILITY', help:'يحدد الحد الأعلى الممكن للطلب حسب مدة خدمتك وبدل السكن الشهري.', helpEn:'Defines the maximum amount you may request based on service duration and monthly housing allowance.'},
+      {id:'requestedAmount', label:'المبلغ المطلوب', labelEn:'Requested Amount', type:'number', required:true, suffix:'ريال', suffixEn:'SAR', min:1, step:'0.01', validation:'HOUSING_REQUEST_AMOUNT', help:'يمكنك طلب أي مبلغ حتى الحد الأعلى المحتسب. لن يسمح النظام بإرسال مبلغ يتجاوز السقف.', helpEn:'You may request any amount up to the calculated ceiling. The system will block amounts above the limit.'},
       {id:'repaymentMonths', label:'مدة السداد المطلوبة', labelEn:'Requested Repayment Period', type:'select', required:true, options:['3','6','9'], optionLabels:{'3':'3 أشهر','6':'6 أشهر','9':'9 أشهر'}, optionLabelsEn:{'3':'3 months','6':'6 months','9':'9 months'}},
       {id:'repaymentStart', label:'تاريخ بدء الخصم', labelEn:'Deduction Start Date', type:'date', required:true},
       {id:'employeeNote', label:'ملاحظات الموظف', labelEn:'Employee Notes', type:'textarea', required:false, placeholder:'تفاصيل إضافية عند الحاجة', placeholderEn:'Additional details if needed'}
