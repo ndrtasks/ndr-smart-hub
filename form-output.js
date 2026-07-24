@@ -28,72 +28,18 @@
     const bytes=await templateBytes();
     const pdfDoc=await window.PDFLib.PDFDocument.load(bytes,{ignoreEncryption:true});
     const form=pdfDoc.getForm();
-
-    setText(form,'6',data.employeeId);
-    setText(form,'1',displayDate(data.requestDate));
-    setText(form,'2',data.employeeName,true);
-    setText(form,'7',data.position,true);
-    setText(form,'3',data.department,true);
-    setText(form,'8',data.vacationContact);
-    setText(form,'4',displayDate(data.joiningDate));
-    setText(form,'9',data.nationality,true);
-    setText(form,'5',data.mobile);
-
-    const last=splitDate(data.lastVacationDate);
-    if(last){setText(form,'30',last.d);setText(form,'14',last.m);setText(form,'13',last.y);setText(form,'10',last.d);setText(form,'11',last.m);setText(form,'12',last.y)}
-    const start=displayDate(data.vacationFrom),end=displayDate(data.vacationTo);
-    setText(form,'18',start);setText(form,'20',start);setText(form,'19',end);
-    setText(form,'23',data.days);
-    setText(form,'24',data.otherType,true);
-    setText(form,'27',data.passportsAttached);
-    setText(form,'28',data.departmentRemarks,true);
-    setText(form,'29',data.alternateEmployee,true);
-
-    setCheck(form,'21',norm(data.vacationType).includes('سنويه'));
-    setCheck(form,'22',norm(data.vacationType).includes('طارئ'));
-    setCheck(form,'25',norm(data.exitReentry)==='شخصي');
-    setCheck(form,'26',norm(data.exitReentry).includes('عائل'));
-
-    try{
-      if(window.fontkit){pdfDoc.registerFontkit(window.fontkit);const fontBytes=await fetch(ARABIC_FONT_URL).then(r=>r.arrayBuffer());const font=await pdfDoc.embedFont(fontBytes,{subset:true});form.updateFieldAppearances(font)}
-    }catch(err){console.warn('Arabic field appearance fallback',err)}
-
-    const out=await pdfDoc.save({useObjectStreams:false,addDefaultPage:false});
-    return new Blob([out],{type:'application/pdf'});
+    setText(form,'6',data.employeeId);setText(form,'1',displayDate(data.requestDate));setText(form,'2',data.employeeName,true);setText(form,'7',data.position,true);setText(form,'3',data.department,true);setText(form,'8',data.vacationContact);setText(form,'4',displayDate(data.joiningDate));setText(form,'9',data.nationality,true);setText(form,'5',data.mobile);
+    const last=splitDate(data.lastVacationDate);if(last){setText(form,'30',last.d);setText(form,'14',last.m);setText(form,'13',last.y);setText(form,'10',last.d);setText(form,'11',last.m);setText(form,'12',last.y)}
+    const start=displayDate(data.vacationFrom),end=displayDate(data.vacationTo);setText(form,'18',start);setText(form,'20',start);setText(form,'19',end);setText(form,'23',data.days);setText(form,'24',data.otherType,true);setText(form,'27',data.passportsAttached);setText(form,'28',data.departmentRemarks,true);setText(form,'29',data.alternateEmployee,true);
+    setCheck(form,'21',norm(data.vacationType).includes('سنويه'));setCheck(form,'22',norm(data.vacationType).includes('طارئ'));setCheck(form,'25',norm(data.exitReentry)==='شخصي');setCheck(form,'26',norm(data.exitReentry).includes('عائل'));
+    try{if(window.fontkit){pdfDoc.registerFontkit(window.fontkit);const fontBytes=await fetch(ARABIC_FONT_URL).then(r=>{if(!r.ok)throw new Error('font');return r.arrayBuffer()});const font=await pdfDoc.embedFont(fontBytes,{subset:true});form.updateFieldAppearances(font)}}catch(err){console.warn('Arabic field appearance fallback',err)}
+    const out=await pdfDoc.save({useObjectStreams:false,addDefaultPage:false});return new Blob([out],{type:'application/pdf'});
   }
-
   async function downloadBlank(){try{downloadBlob(new Blob([await templateBytes()],{type:'application/pdf'}),'HR-F-12_blank_original.pdf')}catch{alert('تعذر تحميل النموذج الأصلي حاليا.')}}
-  async function downloadFilled(data){
-    const btn=document.activeElement;if(btn instanceof HTMLButtonElement){btn.disabled=true;btn.dataset.oldText=btn.textContent;btn.textContent='جاري تجهيز النموذج الأصلي...'}
-    try{const pdf=await buildFilledPdf(data);downloadBlob(pdf,`HR-F-12_${data.employeeId||'employee'}_filled.pdf`)}catch(err){console.error(err);alert('تعذر تجهيز ملف HR-F-12 المعبأ. حاول مرة أخرى.')}
-    finally{if(btn instanceof HTMLButtonElement){btn.disabled=false;btn.textContent=btn.dataset.oldText||'تحميل'}}
-  }
-
-  function ensureRecommendationButtons(){
-    document.querySelectorAll('.form-recommendation').forEach(card=>{
-      const title=card.querySelector('strong')?.textContent||'';if(!title.includes('HR-F-12'))return;
-      const actions=card.querySelector('.actions');if(!actions)return;
-      actions.querySelectorAll('.download-blank-hrf12').forEach(x=>x.remove());
-      if(actions.querySelector('.original-blank-hrf12'))return;
-      const btn=document.createElement('button');btn.type='button';btn.className='outline original-blank-hrf12';btn.textContent='تحميل النموذج الأصلي التفاعلي';btn.addEventListener('click',downloadBlank);actions.prepend(btn);
-    });
-  }
-  function ensureFormButtons(){
-    const formEl=document.querySelector('#guidedForm');if(!formEl)return;
-    const heading=document.querySelector('.form-layout h2')?.textContent||'';if(!heading.includes('HR-F-12'))return;
-    readGuidedForm();
-    formEl.querySelectorAll('input,select,textarea').forEach(el=>{if(el.dataset.pdfCacheBound)return;el.dataset.pdfCacheBound='1';el.addEventListener('change',readGuidedForm);el.addEventListener('input',readGuidedForm)});
-    const actions=formEl.querySelector('.form-actions');if(!actions)return;
-    actions.querySelectorAll('.download-filled-hrf12,.download-blank-hrf12').forEach(x=>x.remove());
-    if(!actions.querySelector('.download-original-filled')){const fill=document.createElement('button');fill.type='button';fill.className='primary download-original-filled';fill.textContent='تعبئة وتحميل النموذج الأصلي PDF';fill.addEventListener('click',()=>downloadFilled(readGuidedForm()||{}));const blank=document.createElement('button');blank.type='button';blank.className='outline original-blank-hrf12';blank.textContent='تحميل النموذج الأصلي فارغ';blank.addEventListener('click',downloadBlank);actions.prepend(fill,blank)}
-  }
-  function ensureDraftButtons(){
-    const draft=document.querySelector('.draft');if(!draft||!(draft.querySelector('h2')?.textContent||'').includes('HR-F-12'))return;
-    draft.querySelector('.pdf-output-actions')?.remove();
-    const actions=document.createElement('div');actions.className='actions pdf-output-actions';
-    const fill=document.createElement('button');fill.type='button';fill.className='primary download-original-filled';fill.textContent='تحميل HR-F-12 الأصلي معبأ';fill.addEventListener('click',()=>downloadFilled(readCached()));
-    const blank=document.createElement('button');blank.type='button';blank.className='outline original-blank-hrf12';blank.textContent='تحميل النموذج الأصلي فارغ';blank.addEventListener('click',downloadBlank);actions.append(fill,blank);draft.append(actions);
-  }
+  async function downloadFilled(data){const btn=document.activeElement;if(btn instanceof HTMLButtonElement){btn.disabled=true;btn.dataset.oldText=btn.textContent;btn.textContent='جاري تجهيز النموذج الأصلي...'}try{const pdf=await buildFilledPdf(data);downloadBlob(pdf,`HR-F-12_${data.employeeId||'employee'}_filled.pdf`)}catch(err){console.error(err);alert('تعذر تجهيز ملف HR-F-12 المعبأ. حاول مرة أخرى.')}finally{if(btn instanceof HTMLButtonElement){btn.disabled=false;btn.textContent=btn.dataset.oldText||'تحميل'}}}
+  function ensureRecommendationButtons(){document.querySelectorAll('.form-recommendation').forEach(card=>{const title=card.querySelector('strong')?.textContent||'';if(!title.includes('HR-F-12'))return;const actions=card.querySelector('.actions');if(!actions)return;actions.querySelectorAll('.download-blank-hrf12').forEach(x=>x.remove());if(actions.querySelector('.original-blank-hrf12'))return;const btn=document.createElement('button');btn.type='button';btn.className='outline original-blank-hrf12';btn.textContent='تحميل النموذج الأصلي التفاعلي';btn.addEventListener('click',downloadBlank);actions.prepend(btn)})}
+  function ensureFormButtons(){const formEl=document.querySelector('#guidedForm');if(!formEl)return;const heading=document.querySelector('.form-layout h2')?.textContent||'';if(!heading.includes('HR-F-12'))return;readGuidedForm();formEl.querySelectorAll('input,select,textarea').forEach(el=>{if(el.dataset.pdfCacheBound)return;el.dataset.pdfCacheBound='1';el.addEventListener('change',readGuidedForm);el.addEventListener('input',readGuidedForm)});const actions=formEl.querySelector('.form-actions');if(!actions)return;actions.querySelectorAll('.download-filled-hrf12,.download-blank-hrf12').forEach(x=>x.remove());if(actions.querySelector('.download-original-filled'))return;const fill=document.createElement('button');fill.type='button';fill.className='primary download-original-filled';fill.textContent='تعبئة وتحميل النموذج الأصلي PDF';fill.addEventListener('click',()=>downloadFilled(readGuidedForm()||{}));const blank=document.createElement('button');blank.type='button';blank.className='outline original-blank-hrf12';blank.textContent='تحميل النموذج الأصلي فارغ';blank.addEventListener('click',downloadBlank);actions.prepend(fill,blank)}
+  function ensureDraftButtons(){const draft=document.querySelector('.draft');if(!draft||!(draft.querySelector('h2')?.textContent||'').includes('HR-F-12')||draft.querySelector('.pdf-output-actions'))return;const actions=document.createElement('div');actions.className='actions pdf-output-actions';const fill=document.createElement('button');fill.type='button';fill.className='primary download-original-filled';fill.textContent='تحميل HR-F-12 الأصلي معبأ';fill.addEventListener('click',()=>downloadFilled(readCached()));const blank=document.createElement('button');blank.type='button';blank.className='outline original-blank-hrf12';blank.textContent='تحميل النموذج الأصلي فارغ';blank.addEventListener('click',downloadBlank);actions.append(fill,blank);draft.append(actions)}
   function enhance(){ensureRecommendationButtons();ensureFormButtons();ensureDraftButtons()}
   const observer=new MutationObserver(enhance);function boot(){enhance();observer.observe(document.body,{childList:true,subtree:true})}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
