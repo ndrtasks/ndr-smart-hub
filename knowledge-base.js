@@ -9,7 +9,7 @@ export const knowledgeBase = [
     sourceDate: '2025-04-13',
     status: 'temporary-pilot',
     sourceName: 'HR-P-07-إجراءات الإجازات (R5).docx',
-    keywords: ['اجازة','إجازة','سنوية','قصيرة','سفر','عودة من الاجازة','leave','vacation','annual leave','short leave'],
+    keywords: ['اجازة','إجازة','سنوية','طوارئ','طارئة','قصيرة','سفر','عودة من الاجازة','leave','vacation','annual leave','emergency leave','short leave'],
     summary: 'الإجراء الحالي يوضح آلية طلب الإجازة والنماذج المرتبطة بها ومسار التوقيعات والمراجعة. يستخدم مؤقتا في التجربة إلى أن يتم رفع الإصدار الجديد.',
     summaryAr: 'الإجراء الحالي يوضح آلية طلب الإجازة والنماذج المرتبطة بها ومسار التوقيعات والمراجعة. يستخدم مؤقتا في التجربة إلى أن يتم رفع الإصدار الجديد.',
     summaryEn: 'The current procedure explains leave requests, related forms and review steps. It is used temporarily for the pilot until the new approved version is uploaded.',
@@ -22,9 +22,36 @@ export const knowledgeBase = [
       'طلبات الإجازات ترسل بالبريد الإلكتروني إلى الموارد البشرية بعد استكمال التوقيعات المطلوبة.'
     ],
     relatedForms: [
-      { code:'HR-F-12', title:'نموذج طلب إجازة', titleEn:'Leave Request Form', indexed:false, note:'النموذج مذكور في الإجراء لكن ملفه وحقوله لم تتم فهرستها بعد.', noteAr:'النموذج مذكور في الإجراء لكن ملفه وحقوله لم تتم فهرستها بعد.', noteEn:'The form is referenced by the procedure but its file and fields are not indexed yet.' },
-      { code:'HR-F-20', title:'نموذج طلب إجازة قصيرة', titleEn:'Short Leave Form', indexed:false, note:'يستخدم حسب الإجراء للإجازة الأقل من 7 أيام.', noteAr:'يستخدم حسب الإجراء للإجازة الأقل من 7 أيام.', noteEn:'Used by the procedure for leave shorter than 7 days.' },
-      { code:'HR-F-21', title:'نموذج العودة من الإجازة', titleEn:'Return From Leave Form', indexed:false, note:'يعبأ في يوم استئناف العمل بعد الإجازة السنوية.', noteAr:'يعبأ في يوم استئناف العمل بعد الإجازة السنوية.', noteEn:'Completed on the day work resumes after annual leave.' },
+      {
+        code:'HR-F-12', title:'نموذج طلب إجازة', titleEn:'Vacation Request Form', indexed:true, revision:'4',
+        sourceName:'محدثHR-F-12 نموذج طلب اجازة.pdf',
+        note:'تمت فهرسة حقول الموظف من النموذج الحالي للتجربة. الحقول الخاصة بالموارد البشرية والمحاسبة والاعتمادات لا يعبئها الموظف.',
+        noteAr:'تمت فهرسة حقول الموظف من النموذج الحالي للتجربة. الحقول الخاصة بالموارد البشرية والمحاسبة والاعتمادات لا يعبئها الموظف.',
+        noteEn:'Employee fields from the current form are indexed for the pilot. HR, accounting and approval-only fields are not completed by the employee.',
+        fields:[
+          {id:'requestDate',label:'تاريخ الطلب',labelEn:'Request date',type:'date',required:true,auto:'today',ask:false},
+          {id:'employeeId',label:'الرقم الوظيفي',labelEn:'Employee ID',type:'text',required:true,auto:'id',ask:false},
+          {id:'employeeName',label:'اسم الموظف',labelEn:'Employee name',type:'text',required:true,auto:'name',ask:false},
+          {id:'position',label:'المسمى الوظيفي',labelEn:'Position',type:'text',required:true,auto:'title',ask:false},
+          {id:'department',label:'الإدارة / القسم',labelEn:'Department / Section',type:'text',required:true,auto:'department',ask:false},
+          {id:'joiningDate',label:'تاريخ التعيين',labelEn:'Joining date',type:'date',required:true,auto:'joiningDate',ask:false},
+          {id:'vacationContact',label:'رقم التواصل أثناء الإجازة',labelEn:'Contact number during vacation',type:'tel',required:true,prompt:'وش رقم التواصل معك أثناء الإجازة؟',promptEn:'What contact number should be used during your vacation?'},
+          {id:'mobile',label:'رقم الجوال',labelEn:'Mobile number',type:'tel',required:true,prompt:'وش رقم جوالك؟ إذا هو نفسه رقم التواصل أثناء الإجازة اكتب: نفس الرقم',promptEn:'What is your mobile number? If it is the same as the vacation contact number, say: same number.'},
+          {id:'nationality',label:'الجنسية',labelEn:'Nationality',type:'text',required:true,prompt:'ما جنسيتك؟',promptEn:'What is your nationality?'},
+          {id:'lastVacationDate',label:'تاريخ آخر إجازة',labelEn:'Last vacation date',type:'date',required:false,prompt:'هل تعرف تاريخ آخر إجازة لك؟ اكتب التاريخ أو اكتب: لا أعرف',promptEn:'Do you know your last vacation date? Enter it or say: I do not know.'},
+          {id:'vacationFrom',label:'الإجازة من',labelEn:'Vacation from',type:'date',required:true,prompt:'متى تبدأ الإجازة؟',promptEn:'When does the vacation start?'},
+          {id:'vacationTo',label:'الإجازة إلى',labelEn:'Vacation to',type:'date',required:true,prompt:'متى تنتهي الإجازة؟',promptEn:'When does the vacation end?'},
+          {id:'days',label:'عدد الأيام',labelEn:'Number of days',type:'number',required:true,calculated:'dateDiffInclusive',ask:false},
+          {id:'vacationType',label:'نوع الإجازة',labelEn:'Vacation type',type:'select',required:true,options:['إجازة سنوية','إجازة طارئة','أخرى'],optionLabelsEn:{'إجازة سنوية':'Annual Vacation','إجازة طارئة':'Emergency Vacation','أخرى':'Other'},prompt:'وش نوع الإجازة؟',promptEn:'What type of vacation is this?'},
+          {id:'otherType',label:'نوع آخر',labelEn:'Other type',type:'text',required:false,showWhen:{field:'vacationType',equals:'أخرى'},prompt:'حدد نوع الإجازة الأخرى.',promptEn:'Specify the other vacation type.'},
+          {id:'exitReentry',label:'تأشيرة خروج وعودة',labelEn:'Exit / Re-entry visa',type:'select',required:false,options:['لا أحتاج','شخصي','لعائلتي'],optionLabelsEn:{'لا أحتاج':'Not needed','شخصي':'Myself','لعائلتي':'My family'},prompt:'هل تحتاج تأشيرة خروج وعودة؟',promptEn:'Do you need an exit/re-entry visa?'},
+          {id:'passportsAttached',label:'عدد الجوازات المرفقة',labelEn:'Number of passports attached',type:'number',required:false,showWhenAny:[{field:'exitReentry',equals:'شخصي'},{field:'exitReentry',equals:'لعائلتي'}],prompt:'كم عدد الجوازات المرفقة؟',promptEn:'How many passports are attached?'},
+          {id:'departmentRemarks',label:'ملاحظات الموظف',labelEn:'Employee remarks',type:'textarea',required:false,prompt:'هل عندك ملاحظة إضافية للطلب؟ اكتبها أو اكتب: لا',promptEn:'Any additional note for the request? Enter it or say: no.'},
+          {id:'alternateEmployee',label:'اسم الموظف البديل',labelEn:'Alternate employee name',type:'text',required:true,prompt:'من الموظف البديل أثناء إجازتك؟',promptEn:'Who is the alternate employee during your vacation?'}
+        ]
+      },
+      { code:'HR-F-20', title:'نموذج طلب إجازة قصيرة', titleEn:'Short Leave Form', indexed:false, note:'يستخدم حسب الإجراء للإجازة الأقل من 7 أيام. ملف النموذج نفسه غير متوفر حاليا ضمن الملفات المفهرسة.', noteAr:'يستخدم حسب الإجراء للإجازة الأقل من 7 أيام. ملف النموذج نفسه غير متوفر حاليا ضمن الملفات المفهرسة.', noteEn:'Used by the procedure for leave shorter than 7 days. The actual form file is not currently available in the indexed files.' },
+      { code:'HR-F-21', title:'نموذج العودة من الإجازة', titleEn:'Return From Leave Form', indexed:false, note:'يعبأ في يوم استئناف العمل بعد الإجازة السنوية. ملف النموذج نفسه غير مفهرس حاليا.', noteAr:'يعبأ في يوم استئناف العمل بعد الإجازة السنوية. ملف النموذج نفسه غير مفهرس حاليا.', noteEn:'Completed on the day work resumes after annual leave. The actual form is not indexed yet.' },
       { code:'HR-F-13', title:'نموذج طلب خدمة إدارية', titleEn:'Administrative Service Request', indexed:false, note:'يرتبط بالتأشيرة وبدل التذكرة حسب ما ورد في الإجراء.', noteAr:'يرتبط بالتأشيرة وبدل التذكرة حسب ما ورد في الإجراء.', noteEn:'Referenced for visa and ticket-related processing in the procedure.' }
     ]
   },
@@ -54,11 +81,17 @@ export const knowledgeBase = [
         code:'HR-F-29', title:'نموذج طلب صرف بدل السكن', titleEn:'Advance Housing Allowance Request Form', indexed:true,
         assetPath:'assets/HR-F-29 نموذج طلب بدل سكن.xlsx',
         fields:[
-          {id:'requestedMonths',label:'مدة الاستحقاق المطلوبة',labelEn:'Requested eligibility period',type:'select',required:true,options:['3','6','9','12']},
-          {id:'requestedAmount',label:'المبلغ المطلوب',labelEn:'Requested amount',type:'number',required:true},
-          {id:'repaymentMonths',label:'مدة السداد المطلوبة',labelEn:'Requested repayment period',type:'select',required:true,options:['3','6','9']},
-          {id:'repaymentStart',label:'تاريخ بدء الخصم',labelEn:'Deduction start date',type:'date',required:true},
-          {id:'employeeNote',label:'ملاحظات الموظف',labelEn:'Employee notes',type:'textarea',required:false}
+          {id:'employeeId',label:'الرقم الوظيفي',labelEn:'Employee ID',type:'text',required:true,auto:'id',ask:false},
+          {id:'employeeName',label:'اسم الموظف',labelEn:'Employee name',type:'text',required:true,auto:'name',ask:false},
+          {id:'position',label:'المسمى الوظيفي',labelEn:'Position',type:'text',required:true,auto:'title',ask:false},
+          {id:'department',label:'الإدارة / القسم',labelEn:'Department',type:'text',required:true,auto:'department',ask:false},
+          {id:'joiningDate',label:'تاريخ التعيين',labelEn:'Joining date',type:'date',required:true,auto:'joiningDate',ask:false},
+          {id:'requestDate',label:'تاريخ الطلب',labelEn:'Request date',type:'date',required:true,auto:'today',ask:false},
+          {id:'requestedMonths',label:'مدة الاستحقاق المطلوبة',labelEn:'Requested eligibility period',type:'select',required:true,options:['3','6','9','12'],prompt:'كم شهر بدل سكن ترغب تطلب؟',promptEn:'How many months of housing allowance do you want to request?'},
+          {id:'requestedAmount',label:'المبلغ المطلوب',labelEn:'Requested amount',type:'number',required:true,prompt:'كم المبلغ الذي ترغب بطلبه؟',promptEn:'What amount would you like to request?'},
+          {id:'repaymentMonths',label:'مدة السداد المطلوبة',labelEn:'Requested repayment period',type:'select',required:true,options:['3','6','9'],prompt:'على كم شهر ترغب يكون السداد؟',promptEn:'Over how many months would you like to repay it?'},
+          {id:'repaymentStart',label:'تاريخ بدء الخصم',labelEn:'Deduction start date',type:'date',required:true,prompt:'متى يبدأ الخصم؟',promptEn:'When should deductions start?'},
+          {id:'employeeNote',label:'ملاحظات الموظف',labelEn:'Employee notes',type:'textarea',required:false,prompt:'هل عندك ملاحظة إضافية؟ اكتبها أو اكتب: لا',promptEn:'Any additional note? Enter it or say: no.'}
         ]
       }
     ]
@@ -69,7 +102,7 @@ export const knowledgeBase = [
     title: 'مذكرة الحضور',
     titleEn: 'Attendance Memo',
     code: 'HR-F-25',
-    revision: 'Pilot source',
+    revision: 'R4',
     status: 'temporary-pilot',
     sourceName: 'HR-F-25 مذكرة الحضور',
     keywords: ['تأخير','متأخر','نسيت البصمة','لم ابصم','خروج مبكر','غائب','عمل عن بعد','attendance','late','missed punch','early departure'],
@@ -86,11 +119,14 @@ export const knowledgeBase = [
       {
         code:'HR-F-25',title:'مذكرة الحضور',titleEn:'Attendance Memo',indexed:true,assetPath:'assets/HR-F-25 مذكرة الحضور.pdf',
         fields:[
-          {id:'attendanceDate',label:'تاريخ الحالة',labelEn:'Attendance event date',type:'date',required:true},
-          {id:'caseType',label:'نوع الحالة',labelEn:'Case type',type:'select',required:true,options:['غائب','خروج مبكر','متأخر','لم يبصم','العمل عن بعد','أخرى']},
-          {id:'inTime',label:'وقت الدخول الفعلي',labelEn:'Actual clock-in time',type:'time',required:false},
-          {id:'outTime',label:'وقت الخروج الفعلي',labelEn:'Actual clock-out time',type:'time',required:false},
-          {id:'reason',label:'السبب والتوضيح',labelEn:'Reason and explanation',type:'textarea',required:true}
+          {id:'employeeId',label:'الرقم الوظيفي',labelEn:'Employee ID',type:'text',required:true,auto:'id',ask:false},
+          {id:'employeeName',label:'اسم الموظف',labelEn:'Employee name',type:'text',required:true,auto:'name',ask:false},
+          {id:'department',label:'القسم',labelEn:'Department',type:'text',required:true,auto:'department',ask:false},
+          {id:'attendanceDate',label:'تاريخ الحالة',labelEn:'Attendance event date',type:'date',required:true,prompt:'متى حصلت حالة الحضور؟',promptEn:'When did the attendance event happen?'},
+          {id:'caseType',label:'نوع الحالة',labelEn:'Case type',type:'select',required:true,options:['غائب','خروج مبكر','متأخر','لم يبصم','العمل عن بعد','أخرى'],prompt:'وش الحالة بالضبط؟',promptEn:'What exactly happened?'},
+          {id:'inTime',label:'وقت الدخول الفعلي',labelEn:'Actual clock-in time',type:'time',required:false,prompt:'كم كان وقت الدخول الفعلي؟',promptEn:'What was the actual clock-in time?'},
+          {id:'outTime',label:'وقت الخروج الفعلي',labelEn:'Actual clock-out time',type:'time',required:false,prompt:'كم كان وقت الخروج الفعلي؟',promptEn:'What was the actual clock-out time?'},
+          {id:'reason',label:'السبب والتوضيح',labelEn:'Reason and explanation',type:'textarea',required:true,prompt:'اشرح لي السبب باختصار.',promptEn:'Briefly explain the reason.'}
         ]
       }
     ]
