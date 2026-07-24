@@ -4,6 +4,25 @@ module.exports = async function handler(req, res) {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
   if (!apiKey) return res.status(503).json({ fallback: true, reason: 'AI_NOT_CONFIGURED' });
 
+  const serviceMonths = (joiningDate, asOf = new Date()) => {
+    if (!joiningDate) return null;
+    const start = new Date(`${joiningDate}T00:00:00`);
+    if (Number.isNaN(start.getTime()) || asOf < start) return null;
+    let months = (asOf.getFullYear() - start.getFullYear()) * 12 + (asOf.getMonth() - start.getMonth());
+    if (asOf.getDate() < start.getDate()) months -= 1;
+    return Math.max(0, months);
+  };
+
+  const eligibilityFor = (eligibility, joiningDate) => {
+    if (!eligibility || eligibility.type !== 'SERVICE_MONTHS') return null;
+    const months = serviceMonths(joiningDate);
+    if (months === null) return { eligible: false, reason: 'MISSING_JOIN_DATE', serviceMonths: null, availableMonths: [] };
+    const minimum = Number(eligibility.minimumMonths || 0);
+    if (months < minimum) return { eligible: false, reason: 'MIN_SERVICE', serviceMonths: months, minimumMonths: minimum, availableMonths: [] };
+    const tier = (eligibility.tiers || []).find(t => months >= Number(t.min || 0) && (t.max === null || t.max === undefined || months <= Number(t.max)));
+    return { eligible: !!tier, reason: tier ? null : 'NO_TIER', serviceMonths: months, minimumMonths: minimum, availableMonths: tier?.months || [] };
+  };
+
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const text = String(body.text || '').trim();
@@ -30,6 +49,15 @@ module.exports = async function handler(req, res) {
         indexed: !!f.indexed,
         noteAr: String(f.noteAr || ''),
         noteEn: String(f.noteEn || ''),
+        eligibility: f.eligibility && typeof f.eligibility === 'object' ? {
+          type: String(f.eligibility.type || ''),
+          minimumMonths: Number(f.eligibility.minimumMonths || 0),
+          tiers: Array.isArray(f.eligibility.tiers) ? f.eligibility.tiers.map(t => ({
+            min: Number(t.min || 0),
+            max: t.max === null || t.max === undefined ? null : Number(t.max),
+            months: Array.isArray(t.months) ? t.months.map(String) : []
+          })) : []
+        } : null,
         fields: Array.isArray(f.fields) ? f.fields.slice(0, 40).map(field => ({
           id: String(field.id || ''),
           label: String(field.label || ''),
@@ -37,44 +65,60 @@ module.exports = async function handler(req, res) {
           type: String(field.type || 'text'),
           required: !!field.required,
           options: Array.isArray(field.options) ? field.options.map(String) : [],
+          dynamicOptions: String(field.dynamicOptions || ''),
+          auto: String(field.auto || ''),
+          calculated: String(field.calculated || ''),
           ask: field.ask !== false
         })) : []
       })) : []
     }));
 
+    const eligibilityContext = safeSources.flatMap(s => s.relatedForms.map(f => ({
+      formCode: f.code,
+      check: eligibilityFor(f.eligibility, employeeProfile.joiningDate)
+    }))).filter(x => x.check);
+
     const prompt = `You are the internal employee knowledge assistant for NDR Smart Hub.
-You are not just a search router. You understand the employee's intent, answer from internal sources, and when appropriate help prepare an indexed form.
+You understand the employee's intent and answer ONLY from internal sources. AI interprets language, but eligibility and financial rules are deterministic and must never be guessed.
 
 MANDATORY GROUNDING RULES:
 1. Use ONLY the supplied internal sources. Never invent a policy, entitlement, approval path, form, requirement, duration, benefit, or field value.
 2. If the answer is absent, say it is not available in the current uploaded sources.
 3. Recommend only a form explicitly listed under the selected source.
-4. A form can be prepared only when indexed=true.
-5. Never claim submission, approval, signature, or sending.
-6. If a source is temporary-pilot, mention this briefly.
-7. Understand Saudi/Gulf colloquial Arabic, formal Arabic, English and mixed language by meaning, not exact words.
+4. A form can be prepared only when indexed=true AND any computed eligibility check says eligible=true.
+5. If computed eligibility says eligible=false, explain that the employee is currently not eligible and DO NOT return PREPARE_FORM.
+6. If computed eligibility lists availableMonths, never suggest any month option outside that list.
+7. Never ask the employee for profile information already supplied in Employee profile context.
+8. Never ask the employee for a value that is marked auto or calculated in the selected form schema.
+9. Never claim submission, approval, signature, or sending.
+10. If a source is temporary-pilot, mention this briefly.
+11. Understand Saudi/Gulf colloquial Arabic, formal Arabic, English and mixed language by meaning, not exact words.
 
 INTENT RULES:
-- QUESTION: user is asking how/what/why and does not explicitly ask to create or prepare the form.
-- PREPARE_FORM: user explicitly wants to apply, request, prepare, fill, create, or says an equivalent action such as "ابي اقدم", "جهز لي", "عبي لي", "ابغى ارفع طلب".
-- If the employee says "كيف أقدم إجازة؟" => QUESTION.
-- If the employee says "أبي أقدم إجازة" => PREPARE_FORM.
+- QUESTION: user is asking how/what/why and does not explicitly ask to create or prepare the form, OR eligibility blocks preparation.
+- PREPARE_FORM: user explicitly wants to apply/request/prepare/fill/create and the exact form is indexed and eligible.
+- "كيف أقدم إجازة؟" => QUESTION.
+- "أبي أقدم إجازة" => PREPARE_FORM when the form is available.
 - If they provide dates/details in the same message, extract them into prefill when the exact indexed form has matching fields.
-- For a short leave explicitly described as less than 7 days, use HR-F-20 when it exists in the source. Do not silently substitute HR-F-12.
-- If the recommended form is not indexed, still explain the procedure but action must be QUESTION and prefill must be {}.
+- For short leave explicitly described as less than 7 days, use HR-F-20 when it exists in the source. Do not silently substitute HR-F-12.
+- If the recommended form is not indexed, explain the procedure but return QUESTION and empty prefill.
 - Ask one clarification question only when the correct source/form genuinely cannot be determined.
 
 PREFILL RULES:
-- Extract only values explicitly present in the user's message or safely derivable from them.
-- Never fabricate dates, phone numbers, nationality, alternate employee, balances, approvals, or entitlement.
-- Dates should be returned as YYYY-MM-DD only when you can confidently resolve them from the current conversation. Otherwise omit them.
+- Extract only values explicitly present in the user's message or safely derivable from it.
+- Never fabricate dates, phone numbers, nationality, alternate employee, balances, approvals, entitlement, or financial values.
+- Dates should be YYYY-MM-DD when confidently resolvable.
 - Map only to field ids supplied in the selected indexed form.
-- Employee profile is reference context; do not repeat it in prefill because the client auto-fills profile fields itself.
+- Do not put auto/calculated profile fields into prefill because the client fills/calculates them deterministically.
 
 Reply in ${language === 'en' ? 'English' : 'Arabic'}.
 
+Current date: ${new Date().toISOString().slice(0,10)}
 Employee profile context:
 ${JSON.stringify(employeeProfile)}
+
+Deterministic eligibility results calculated by the system:
+${JSON.stringify(eligibilityContext)}
 
 Recent conversation:
 ${JSON.stringify(messages)}
@@ -102,7 +146,7 @@ Return JSON ONLY:
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.03, responseMimeType: 'application/json' }
+        generationConfig: { temperature: 0.02, responseMimeType: 'application/json' }
       })
     });
     if (!response.ok) return res.status(502).json({ fallback: true, reason: 'AI_PROVIDER_ERROR' });
@@ -117,14 +161,17 @@ Return JSON ONLY:
     const allowedForms = new Set(forms.map(f => f.code));
     const recommendedFormCode = allowedForms.has(parsed.recommendedFormCode) ? parsed.recommendedFormCode : null;
     const selectedForm = forms.find(f => f.code === recommendedFormCode) || null;
+    const selectedEligibility = eligibilityFor(selectedForm?.eligibility, employeeProfile.joiningDate);
     let intent = parsed.intent === 'PREPARE_FORM' ? 'PREPARE_FORM' : 'QUESTION';
-    if (!selectedForm?.indexed) intent = 'QUESTION';
+    if (!selectedForm?.indexed || selectedEligibility?.eligible === false) intent = 'QUESTION';
 
-    const allowedFieldIds = new Set((selectedForm?.fields || []).map(f => f.id));
+    const allowedFieldIds = new Set((selectedForm?.fields || []).filter(f => !f.auto && !f.calculated).map(f => f.id));
     const prefill = {};
     if (parsed.prefill && typeof parsed.prefill === 'object' && !Array.isArray(parsed.prefill)) {
       for (const [key, value] of Object.entries(parsed.prefill)) {
-        if (allowedFieldIds.has(key) && value !== null && value !== undefined && String(value).trim() !== '') prefill[key] = String(value).slice(0, 500);
+        if (!allowedFieldIds.has(key) || value === null || value === undefined || String(value).trim() === '') continue;
+        if (key === 'requestedMonths' && selectedEligibility?.availableMonths?.length && !selectedEligibility.availableMonths.includes(String(value))) continue;
+        prefill[key] = String(value).slice(0, 500);
       }
     }
 
@@ -132,7 +179,7 @@ Return JSON ONLY:
     const clarificationQuestion = parsed.clarificationQuestion ? String(parsed.clarificationQuestion).slice(0, 500) : null;
     if (!answer && !clarificationQuestion) return res.status(200).json({ fallback: true, reason: 'LOW_CONFIDENCE' });
 
-    return res.status(200).json({ answer, sourceIds, recommendedFormCode, intent, prefill, clarificationQuestion });
+    return res.status(200).json({ answer, sourceIds, recommendedFormCode, intent, prefill, clarificationQuestion, eligibility: selectedEligibility });
   } catch (error) {
     return res.status(500).json({ fallback: true, reason: 'KNOWLEDGE_ASSISTANT_EXCEPTION' });
   }
