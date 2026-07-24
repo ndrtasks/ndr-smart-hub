@@ -71,15 +71,25 @@ export const knowledgeBase = [
     summaryEn: 'The procedure governs advance housing allowance requests, eligibility review and financial processing.',
     sourceTextAr: [
       'يقوم الموظف بتعبئة نموذج HR-F-29 واستكمال البيانات وتوقيع الإقرار والتعهد.',
+      'الحد الأدنى للاستحقاق يبدأ من خدمة 3 سنوات ونصف.',
+      'من 3 سنوات ونصف إلى أقل من 5 سنوات يكون الخيار المتاح 3 أشهر.',
+      'من 5 سنوات إلى أقل من 6 سنوات تكون الخيارات المتاحة 6 أو 9 أشهر.',
+      'من 6 سنوات فأكثر يكون الحد الأعلى 12 شهرا ويجوز اختيار مدة أقل.',
       'تراجع الموارد البشرية البيانات وتتحقق من استيفاء شروط الاستحقاق ثم تحيل الطلب إلى المحاسبة.',
       'تراجع المحاسبة الطلب ماليا وتتأكد من مبلغ الاستحقاق ثم ترفعه للرئيس التنفيذي للاعتماد النهائي.',
-      'بعد الاعتماد تقوم المحاسبة بالصرف وتوثيق العملية.',
-      'الاستحقاق يعتمد على مدة الخدمة والضوابط الواردة في الإجراء ولا يجوز تجاوز الحد الأعلى المسموح.'
+      'بعد الاعتماد تقوم المحاسبة بالصرف وتوثيق العملية.'
     ],
     relatedForms: [
       {
         code:'HR-F-29', title:'نموذج طلب صرف بدل السكن', titleEn:'Advance Housing Allowance Request Form', indexed:true,
-        assetPath:'assets/HR-F-29 نموذج طلب بدل سكن.xlsx',
+        note:'ملف النموذج الأصلي غير موجود حاليا داخل مستودع GitHub، لذلك تم إيقاف زر فتح الملف حتى لا يظهر خطأ 404.',
+        noteAr:'ملف النموذج الأصلي غير موجود حاليا داخل مستودع GitHub، لذلك تم إيقاف زر فتح الملف حتى لا يظهر خطأ 404.',
+        noteEn:'The original form file is not currently stored in the GitHub repository, so the open-file button is disabled to prevent a 404 error.',
+        eligibility:{type:'SERVICE_MONTHS',minimumMonths:42,tiers:[
+          {min:42,max:59,months:['3']},
+          {min:60,max:71,months:['6','9']},
+          {min:72,max:null,months:['3','6','9','12']}
+        ]},
         fields:[
           {id:'employeeId',label:'الرقم الوظيفي',labelEn:'Employee ID',type:'text',required:true,auto:'id',ask:false},
           {id:'employeeName',label:'اسم الموظف',labelEn:'Employee name',type:'text',required:true,auto:'name',ask:false},
@@ -87,10 +97,12 @@ export const knowledgeBase = [
           {id:'department',label:'الإدارة / القسم',labelEn:'Department',type:'text',required:true,auto:'department',ask:false},
           {id:'joiningDate',label:'تاريخ التعيين',labelEn:'Joining date',type:'date',required:true,auto:'joiningDate',ask:false},
           {id:'requestDate',label:'تاريخ الطلب',labelEn:'Request date',type:'date',required:true,auto:'today',ask:false},
-          {id:'requestedMonths',label:'مدة الاستحقاق المطلوبة',labelEn:'Requested eligibility period',type:'select',required:true,options:['3','6','9','12'],prompt:'كم شهر بدل سكن ترغب تطلب؟',promptEn:'How many months of housing allowance do you want to request?'},
-          {id:'requestedAmount',label:'المبلغ المطلوب',labelEn:'Requested amount',type:'number',required:true,prompt:'كم المبلغ الذي ترغب بطلبه؟',promptEn:'What amount would you like to request?'},
+          {id:'requestedMonths',label:'مدة بدل السكن المطلوبة',labelEn:'Requested housing period',type:'select',required:true,dynamicOptions:'HOUSING_ELIGIBILITY',prompt:'حسب مدة خدمتك، اختر مدة بدل السكن المتاحة لك.',promptEn:'Based on your service period, select an available housing allowance period.'},
+          {id:'monthlyHousingAllowance',label:'بدل السكن الشهري',labelEn:'Monthly housing allowance',type:'number',required:true,auto:'housingAllowance',ask:false},
+          {id:'requestedAmount',label:'إجمالي المبلغ',labelEn:'Total amount',type:'number',required:true,calculated:'housingTotal',ask:false},
           {id:'repaymentMonths',label:'مدة السداد المطلوبة',labelEn:'Requested repayment period',type:'select',required:true,options:['3','6','9'],prompt:'على كم شهر ترغب يكون السداد؟',promptEn:'Over how many months would you like to repay it?'},
-          {id:'repaymentStart',label:'تاريخ بدء الخصم',labelEn:'Deduction start date',type:'date',required:true,prompt:'متى يبدأ الخصم؟',promptEn:'When should deductions start?'},
+          {id:'repaymentStart',label:'تاريخ بدء الخصم',labelEn:'Deduction start date',type:'date',required:true,prompt:'متى يبدأ الخصم؟ تقدر تكتب: اليوم أو 24/7 أو 24/7/2026.',promptEn:'When should deductions start? You can say: today or 24/7 or 24/7/2026.'},
+          {id:'repaymentEnd',label:'تاريخ انتهاء الخصم',labelEn:'Deduction end date',type:'date',required:true,calculated:'repaymentEnd',ask:false},
           {id:'employeeNote',label:'ملاحظات الموظف',labelEn:'Employee notes',type:'textarea',required:false,prompt:'هل عندك ملاحظة إضافية؟ اكتبها أو اكتب: لا',promptEn:'Any additional note? Enter it or say: no.'}
         ]
       }
