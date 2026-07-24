@@ -10,6 +10,7 @@ export const knowledgeBase = [
     status: 'temporary-pilot',
     sourceName: 'HR-P-07-إجراءات الإجازات (R5).docx',
     keywords: ['اجازة','إجازة','سنوية','قصيرة','سفر','عودة من الاجازة','leave','vacation','annual leave','short leave'],
+    summary: 'الإجراء الحالي يوضح آلية طلب الإجازة والنماذج المرتبطة بها ومسار التوقيعات والمراجعة. يستخدم مؤقتا في التجربة إلى أن يتم رفع الإصدار الجديد.',
     summaryAr: 'الإجراء الحالي يوضح آلية طلب الإجازة والنماذج المرتبطة بها ومسار التوقيعات والمراجعة. يستخدم مؤقتا في التجربة إلى أن يتم رفع الإصدار الجديد.',
     summaryEn: 'The current procedure explains leave requests, related forms and review steps. It is used temporarily for the pilot until the new approved version is uploaded.',
     sourceTextAr: [
@@ -21,10 +22,10 @@ export const knowledgeBase = [
       'طلبات الإجازات ترسل بالبريد الإلكتروني إلى الموارد البشرية بعد استكمال التوقيعات المطلوبة.'
     ],
     relatedForms: [
-      { code:'HR-F-12', title:'نموذج طلب إجازة', titleEn:'Leave Request Form', indexed:false, noteAr:'النموذج مذكور في الإجراء لكن ملفه وحقوله لم تتم فهرستها بعد.', noteEn:'The form is referenced by the procedure but its file and fields are not indexed yet.' },
-      { code:'HR-F-20', title:'نموذج طلب إجازة قصيرة', titleEn:'Short Leave Form', indexed:false, noteAr:'يستخدم حسب الإجراء للإجازة الأقل من 7 أيام.', noteEn:'Used by the procedure for leave shorter than 7 days.' },
-      { code:'HR-F-21', title:'نموذج العودة من الإجازة', titleEn:'Return From Leave Form', indexed:false, noteAr:'يعبأ في يوم استئناف العمل بعد الإجازة السنوية.', noteEn:'Completed on the day work resumes after annual leave.' },
-      { code:'HR-F-13', title:'نموذج طلب خدمة إدارية', titleEn:'Administrative Service Request', indexed:false, noteAr:'يرتبط بالتأشيرة وبدل التذكرة حسب ما ورد في الإجراء.', noteEn:'Referenced for visa and ticket-related processing in the procedure.' }
+      { code:'HR-F-12', title:'نموذج طلب إجازة', titleEn:'Leave Request Form', indexed:false, note:'النموذج مذكور في الإجراء لكن ملفه وحقوله لم تتم فهرستها بعد.', noteAr:'النموذج مذكور في الإجراء لكن ملفه وحقوله لم تتم فهرستها بعد.', noteEn:'The form is referenced by the procedure but its file and fields are not indexed yet.' },
+      { code:'HR-F-20', title:'نموذج طلب إجازة قصيرة', titleEn:'Short Leave Form', indexed:false, note:'يستخدم حسب الإجراء للإجازة الأقل من 7 أيام.', noteAr:'يستخدم حسب الإجراء للإجازة الأقل من 7 أيام.', noteEn:'Used by the procedure for leave shorter than 7 days.' },
+      { code:'HR-F-21', title:'نموذج العودة من الإجازة', titleEn:'Return From Leave Form', indexed:false, note:'يعبأ في يوم استئناف العمل بعد الإجازة السنوية.', noteAr:'يعبأ في يوم استئناف العمل بعد الإجازة السنوية.', noteEn:'Completed on the day work resumes after annual leave.' },
+      { code:'HR-F-13', title:'نموذج طلب خدمة إدارية', titleEn:'Administrative Service Request', indexed:false, note:'يرتبط بالتأشيرة وبدل التذكرة حسب ما ورد في الإجراء.', noteAr:'يرتبط بالتأشيرة وبدل التذكرة حسب ما ورد في الإجراء.', noteEn:'Referenced for visa and ticket-related processing in the procedure.' }
     ]
   },
   {
@@ -38,6 +39,7 @@ export const knowledgeBase = [
     status: 'temporary-pilot',
     sourceName: 'HR-P-19 إجراء طلب صرف بدل السكن (R6)(1).docx',
     keywords: ['بدل السكن','سكن','مقدم سكن','صرف بدل السكن','housing','housing allowance','advance housing'],
+    summary: 'ينظم الإجراء طلب واعتماد وصرف بدل السكن مقدما والتحقق من الاستحقاق والمراجعة المالية.',
     summaryAr: 'ينظم الإجراء طلب واعتماد وصرف بدل السكن مقدما والتحقق من الاستحقاق والمراجعة المالية.',
     summaryEn: 'The procedure governs advance housing allowance requests, eligibility review and financial processing.',
     sourceTextAr: [
@@ -71,6 +73,7 @@ export const knowledgeBase = [
     status: 'temporary-pilot',
     sourceName: 'HR-F-25 مذكرة الحضور',
     keywords: ['تأخير','متأخر','نسيت البصمة','لم ابصم','خروج مبكر','غائب','عمل عن بعد','attendance','late','missed punch','early departure'],
+    summary: 'النموذج يستخدم لتوضيح أو تصحيح حالات الحضور مثل الغياب والتأخر والخروج المبكر والبصمة المفقودة والعمل عن بعد.',
     summaryAr: 'النموذج يستخدم لتوضيح أو تصحيح حالات الحضور مثل الغياب والتأخر والخروج المبكر والبصمة المفقودة والعمل عن بعد.',
     summaryEn: 'The form is used to explain or correct attendance events such as absence, lateness, early departure, missed punch and remote work.',
     sourceTextAr: [
