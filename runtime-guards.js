@@ -21,7 +21,7 @@
     return `${CHAT_KEY}:${currentUserId(storage)}`;
   }
 
-  // Never expose the old shared chat key again. It may contain another employee's conversation.
+  // The old key was shared by every demo employee. Remove it rather than risk exposing another employee's history.
   try { nativeRemove.call(localStorage, CHAT_KEY); } catch {}
 
   Storage.prototype.getItem = function(key) {
@@ -46,17 +46,12 @@
   function scrollChatToBottom() {
     const el = chatContainer();
     if (!el) return;
-    requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-      const last = el.lastElementChild;
-      if (last) last.scrollIntoView({ block: 'end', behavior: 'smooth' });
-    });
+    requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
   }
 
   function clearCurrentEmployeeChat() {
-    const scopedKey = scopedChatKey(localStorage);
-    nativeRemove.call(localStorage, scopedKey);
-    // Reload resets in-memory messages and any in-progress guided form session safely.
+    nativeRemove.call(localStorage, scopedChatKey(localStorage));
+    // A reload also clears any in-memory form session/draft without touching another employee's data.
     window.location.reload();
   }
 
@@ -84,7 +79,7 @@
     const loginBtn = event.target.closest?.('#loginBtn');
     if (loginBtn && !loginReloadPending) {
       loginReloadPending = true;
-      // app.js stores the selected employee first; reload then hydrates only that employee's chat.
+      // app.js stores the selected employee first. Reload afterwards so the new account hydrates only its own history.
       setTimeout(() => window.location.reload(), 80);
       return;
     }
