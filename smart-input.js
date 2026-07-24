@@ -4,15 +4,37 @@
   const norm=(value='')=>String(value).toLowerCase().replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه').replace(/[ًٌٍَُِّْـ]/g,'').replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g,d=>'۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/\s+/g,' ').trim();
   const pad=n=>String(n).padStart(2,'0');
   const formatDisplay=d=>`${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
-  const formatInput=d=>`${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`;
+  const formatInput=d=>`${d.getDate()}/${d.getMonth()+1)}/${d.getFullYear()}`;
   const cleanDate=date=>{const d=new Date(date);d.setHours(0,0,0,0);return d};
   const addDays=(base,days)=>{const d=cleanDate(base);d.setDate(d.getDate()+days);return d};
   const addMonths=(base,months)=>{const d=cleanDate(base),day=d.getDate();d.setDate(1);d.setMonth(d.getMonth()+months);const max=new Date(d.getFullYear(),d.getMonth()+1,0).getDate();d.setDate(Math.min(day,max));return d};
-  const wordNumbers={
-    'واحد':1,'واحده':1,'يوم':1,'اثنين':2,'اثنان':2,'اثنتين':2,'اثنتان':2,'ثنين':2,
-    'ثلاث':3,'ثلاثه':3,'اربعه':4,'اربع':4,'خمسه':5,'خمس':5,'سته':6,'ست':6,'سبعه':7,'سبع':7,'ثمانيه':8,'ثمان':8,'تسعه':9,'تسع':9,'عشره':10,'عشر':10
+
+  const units={
+    'صفر':0,'واحد':1,'واحده':1,'احد':1,'اثنين':2,'اثنان':2,'اثنتين':2,'اثنتان':2,'ثنين':2,
+    'ثلاث':3,'ثلاثه':3,'اربع':4,'اربعه':4,'خمس':5,'خمسه':5,'ست':6,'سته':6,
+    'سبع':7,'سبعه':7,'ثمان':8,'ثمانيه':8,'تسع':9,'تسعه':9,'عشر':10,'عشره':10,
+    'احد عشر':11,'احدى عشر':11,'اثنا عشر':12,'اثني عشر':12,'اثنتا عشر':12,'اثنتي عشر':12,
+    'ثلاثه عشر':13,'ثلاث عشر':13,'اربعه عشر':14,'اربع عشر':14,'خمسه عشر':15,'خمس عشر':15,
+    'سته عشر':16,'ست عشر':16,'سبعه عشر':17,'سبع عشر':17,'ثمانيه عشر':18,'ثمان عشر':18,'تسعه عشر':19,'تسع عشر':19
   };
-  function numberFromToken(token){const n=norm(token);if(/^\d+$/.test(n))return Number(n);return wordNumbers[n]||null}
+  const tens={'عشرين':20,'ثلاثين':30,'اربعين':40,'خمسين':50,'ستين':60,'سبعين':70,'ثمانين':80,'تسعين':90};
+
+  function numberFromWords(value){
+    const n=norm(value).replace(/^و/,'').trim();
+    if(/^\d+$/.test(n))return Number(n);
+    if(Object.prototype.hasOwnProperty.call(units,n))return units[n];
+    if(Object.prototype.hasOwnProperty.call(tens,n))return tens[n];
+    const parts=n.split(/\s+و\s+|و(?=[^\s])/).map(x=>x.trim()).filter(Boolean);
+    if(parts.length===2){
+      const a=Object.prototype.hasOwnProperty.call(units,parts[0])?units[parts[0]]:tens[parts[0]];
+      const b=Object.prototype.hasOwnProperty.call(units,parts[1])?units[parts[1]]:tens[parts[1]];
+      if(Number.isFinite(a)&&Number.isFinite(b))return a+b;
+    }
+    const spaced=n.match(/^(.+?)\s+و\s+(.+)$/);
+    if(spaced){const a=numberFromWords(spaced[1]),b=numberFromWords(spaced[2]);if(Number.isFinite(a)&&Number.isFinite(b))return a+b}
+    return null;
+  }
+
   function parseAbsoluteOrSimple(value,base=new Date()){
     const n=norm(value);
     if(['بكره','بكرة','غدا','غداً','tomorrow'].map(norm).includes(n))return addDays(base,1);
@@ -30,8 +52,8 @@
     if(['بكره','بكرة','غدا','غداً','tomorrow'].map(norm).includes(n))return {date:addDays(base,1),source:value,baseLabel:baseInfo.label,base};
     const exact={'بعد يوم':['d',1],'بعد يومين':['d',2],'بعد اسبوع':['d',7],'بعد اسبوعين':['d',14],'بعد شهر':['m',1],'بعد شهرين':['m',2]};
     if(exact[n]){const [u,v]=exact[n];return {date:u==='d'?addDays(base,v):addMonths(base,v),source:value,baseLabel:baseInfo.label,base}}
-    const m=n.match(/^بعد\s+([^\s]+)\s*(يوم|ايام|اسبوع|اسابيع|شهر|اشهر)$/);
-    if(m){const count=numberFromToken(m[1]);if(count){const unit=m[2];const date=unit.startsWith('اسبوع')?addDays(base,count*7):unit.startsWith('شهر')?addMonths(base,count):addDays(base,count);return {date,source:value,baseLabel:baseInfo.label,base}}}
+    const m=n.match(/^بعد\s+(.+?)\s+(يوم|يوما|ايام|اسبوع|اسبوعا|اسابيع|شهر|شهرا|اشهر)$/);
+    if(m){const count=numberFromWords(m[1]);if(Number.isFinite(count)&&count>0){const unit=m[2];const date=unit.startsWith('اسبوع')?addDays(base,count*7):unit.startsWith('شهر')?addMonths(base,count):addDays(base,count);return {date,source:value,baseLabel:baseInfo.label,base}}}
     return null;
   }
   const isDateQuestion=()=>['متى تبدا الاجازه','متى تنتهي الاجازه','تاريخ اخر اجازه','اكتب التاريخ'].some(x=>latestAssistantText().includes(norm(x)));
