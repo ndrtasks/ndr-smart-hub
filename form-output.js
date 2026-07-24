@@ -15,8 +15,15 @@
   }
   function readCached(){try{return JSON.parse(sessionStorage.getItem(CACHE_KEY)||'{}')}catch{return {}}}
   function downloadBlob(blob,filename){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500)}
-  function bytesFromBase64(b64){const bin=atob(b64.replace(/\s/g,'')),out=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);return out}
-  async function templateBytes(){const parts=await Promise.all(TEMPLATE_PARTS.map(p=>fetch(p,{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error(`template:${p}:${r.status}`);return r.text()})));return bytesFromBase64(parts.join(''))}
+  function bytesFromBase64(b64){const clean=String(b64||'').replace(/\s/g,''),bin=atob(clean),out=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);return out}
+  function concatBytes(parts){const total=parts.reduce((n,p)=>n+p.length,0),out=new Uint8Array(total);let offset=0;for(const part of parts){out.set(part,offset);offset+=part.length}return out}
+  async function templateBytes(){
+    const encodedParts=await Promise.all(TEMPLATE_PARTS.map(p=>fetch(p,{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error(`template:${p}:${r.status}`);return r.text()})));
+    const decoded=encodedParts.map((part,index)=>{try{return bytesFromBase64(part)}catch(err){throw new Error(`template-decode-part-${index+1}:${err.message}`)}});
+    const merged=concatBytes(decoded);
+    if(merged.length<5||String.fromCharCode(...merged.slice(0,5))!=='%PDF-')throw new Error('template-invalid-pdf-header');
+    return merged;
+  }
   function splitDate(value){const raw=esc(value);let m=raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);if(m)return {d:m[3],m:m[2],y:m[1]};m=raw.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/);if(m){let y=m[3];if(y.length===2)y='20'+y;return {d:m[1],m:m[2],y}};return null}
   function displayDate(value){const p=splitDate(value);return p?`${p.d}/${p.m}/${p.y}`:esc(value)}
   function setText(form,name,value,alignRight=false){if(!esc(value))return;try{const f=form.getTextField(String(name));f.setText(esc(value));if(alignRight&&window.PDFLib?.TextAlignment)f.setAlignment(window.PDFLib.TextAlignment.Right)}catch(err){console.warn('HR-F-12 text field',name,err)}}
@@ -40,15 +47,12 @@
     const start=displayDate(data.vacationFrom),end=displayDate(data.vacationTo);setText(form,'18',start);setText(form,'20',start);setText(form,'19',end);setText(form,'23',data.days);setText(form,'24',data.otherType,true);setText(form,'27',data.passportsAttached);setText(form,'28',data.departmentRemarks,true);setText(form,'29',data.alternateEmployee,true);
     setCheck(form,'21',norm(data.vacationType).includes('سنويه'));setCheck(form,'22',norm(data.vacationType).includes('طارئ'));setCheck(form,'25',norm(data.exitReentry)==='شخصي');setCheck(form,'26',norm(data.exitReentry).includes('عائل'));
 
-    // Keep the original AcroForm interactive. Do not regenerate appearances with Helvetica,
-    // because Arabic values cannot be encoded by WinAnsi. PDF viewers render the current
-    // field values using the original form resources when NeedAppearances is enabled.
     requestViewerAppearances(form);
     const out=await pdfDoc.save({useObjectStreams:false,addDefaultPage:false,updateFieldAppearances:false});
     return new Blob([out],{type:'application/pdf'});
   }
 
-  async function downloadBlank(){try{downloadBlob(new Blob([await templateBytes()],{type:'application/pdf'}),'HR-F-12_blank_original.pdf')}catch(err){console.error(err);alert('تعذر تحميل النموذج الأصلي حاليا.')}}
+  async function downloadBlank(){try{downloadBlob(new Blob([await templateBytes()],{type:'application/pdf'}),'HR-F-12_blank_original.pdf')}catch(err){console.error(err);alert(`تعذر تحميل النموذج الأصلي. سبب تقني: ${err?.message||'غير معروف'}`)}}
   async function downloadFilled(data){
     const btn=document.activeElement;
     if(btn instanceof HTMLButtonElement){btn.disabled=true;btn.dataset.oldText=btn.textContent;btn.textContent='جاري تعبئة النموذج الأصلي...'}
